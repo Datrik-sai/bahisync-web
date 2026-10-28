@@ -2,6 +2,9 @@
 
 Bank statement PDF → TallyPrime vouchers, with every row checked against the running balance.
 
+**Live:** site https://bahisync-web.vercel.app · API https://bahisync-api.vercel.app/api/health
+(Vercel, region bom1; every push to `main` redeploys both projects.)
+
 ## What works today (v0.1)
 
 - **Any layout with a column header:** the parser finds Date / Narration / Debit / Credit / Balance
