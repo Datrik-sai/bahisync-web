@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+/* Ledger-paper palette: columnar green paper, blue-black ink.
+   Red is reserved for balance mismatches, as in a real ledger. */
+@theme {
+  --color-paper: #f3f7f1;
+  --color-sheet: #ffffff;
+  --color-rule: #cfe0d1;
+  --color-rule-strong: #8fb59a;
+  --color-ledger: #2f6b45;
+  --color-ink: #1c2a5a;
+  --color-ink-soft: #4a5578;
+  --color-ink-faint: #7b84a1;
+  --color-mismatch: #b42318;
+  --color-mismatch-bg: #fde8e6;
+  --color-review: #8a5a00;
+  --color-review-bg: #fff3d6;
+  --color-ok: #2f6b45;
+  --color-ok-bg: #e3f1e6;
+  --font-sans: "Public Sans Variable", ui-sans-serif, system-ui, sans-serif;
+}
+
+html {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Ruled ledger lines, used on the hero strip and the review grid. */
+.ruled {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 39px,
+    var(--color-rule) 39px,
+    var(--color-rule) 40px
+  );
+}
+
+.amount {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 2px;
+}
+
+@keyframes tick-in {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes voucher-in {
+  from { opacity: 0; transform: translateX(-6px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .tick { animation: tick-in 260ms ease-out both; }
+  .voucher { animation: voucher-in 320ms ease-out both; }
+}

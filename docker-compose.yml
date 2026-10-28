@@ -1,0 +1,24 @@
+# Run everything locally: docker compose up --build   then open http://localhost:3000
+services:
+  api:
+    build: ./engine
+    environment:
+      BAHISYNC_ALLOWED_ORIGINS: http://localhost:3000
+      # ANTHROPIC_API_KEY: sk-ant-...   # optional: AI ledger suggestions
+    volumes:
+      - bahisync-data:/data
+    ports:
+      - "8000:8000"
+  web:
+    build:
+      context: ./web
+      args:
+        BAHISYNC_API_URL: http://api:8000
+    environment:
+      BAHISYNC_API_URL: http://api:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+volumes:
+  bahisync-data:

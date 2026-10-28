@@ -1,0 +1,21 @@
+# Never commit statements or customer data
+engine/data/
+engine/samples/
+engine/tests/fixtures/out/
+*.pdf
+!engine/tests/fixtures/*.py
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# Node
+web/node_modules/
+web/.next/
+web/out/
+web/.env*.local
+
+.env
+.DS_Store
