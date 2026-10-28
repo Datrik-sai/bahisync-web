@@ -57,6 +57,10 @@ _ACCOUNT_RE = re.compile(r"(?i)(?:a/c|account)\s*(?:no\.?|number)?\s*[:\-]?\s*([
 
 def detect_bank(text: str) -> str:
     for m in _IFSC_RE.finditer(text):
+        # Regional rural banks use their sponsor bank's IFSC with "RR" after the
+        # zero (SBIN0RRDCGB); the printed bank name is the better signal there.
+        if m.group(0)[5:7] == "RR":
+            continue
         name = IFSC_PREFIXES.get(m.group(1))
         if name:
             return name

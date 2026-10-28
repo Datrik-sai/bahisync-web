@@ -5,9 +5,15 @@ import { WaitlistForm } from "@/components/WaitlistForm";
 import { SiteHeader, Wordmark } from "@/components/Wordmark";
 
 const STEPS = [
-  { title: "Upload the PDF", body: "The statement PDF from net banking, from any Indian bank. Password-protected files work too." },
+  {
+    title: "Upload the PDF",
+    body: "Any Indian bank's digital statement PDF, including password-protected ones. Scanned (photographed or printed-and-scanned) PDFs aren't supported online yet.",
+  },
   { title: "Every row is checked", body: "Each row is added to the previous balance. If it doesn't land on the printed balance, it's flagged." },
-  { title: "Review only what's flagged", body: "Ledgers come from your past choices for that client. You fix the few rows we're unsure about." },
+  {
+    title: "Review only what's flagged",
+    body: "Ledgers come from your past choices for that client and your existing Tally masters. Unclear rows go to the client on WhatsApp in one message.",
+  },
   { title: "Import into Tally", body: "Download ledger masters and vouchers as XML, or an Excel sheet if you prefer." },
 ];
 
@@ -29,7 +35,10 @@ export default function Home() {
               <Link href="/app" className="rounded-md bg-ink px-5 py-3 font-semibold text-white hover:bg-[#121c40]">
                 Convert a statement
               </Link>
-              <a href="#waitlist" className="rounded-md border border-ink/30 px-5 py-3 font-semibold text-ink hover:border-ink">
+              <Link href="/app/review/sample-hdfc" className="rounded-md border border-ledger bg-ok-bg px-5 py-3 font-semibold text-ok hover:border-ok">
+                Try instant HDFC sample statement →
+              </Link>
+              <a href="#waitlist" className="px-2 py-3 font-semibold text-ink underline underline-offset-4">
                 Join the waitlist
               </a>
             </div>
@@ -87,12 +96,16 @@ export default function Home() {
             <h2 className="text-2xl font-[720] tracking-[-0.02em] sm:text-3xl">Your clients' data</h2>
             <ul className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
               <li>
-                <h3 className="font-[680]">The PDF is never stored</h3>
-                <p className="mt-1.5 leading-relaxed text-ink-soft">It's read in memory to extract the rows, then discarded. Nothing is saved on our servers.</p>
+                <h3 className="font-[680]">Stateless server</h3>
+                <p className="mt-1.5 leading-relaxed text-ink-soft">
+                  Your PDF is parsed in memory and discarded straight away. There is no database of statements on our side.
+                </p>
               </li>
               <li>
-                <h3 className="font-[680]">Rows stay in your browser</h3>
-                <p className="mt-1.5 leading-relaxed text-ink-soft">The extracted rows are kept only on your computer, and cleared after 24 hours or when you delete them.</p>
+                <h3 className="font-[680]">Browser-only cache</h3>
+                <p className="mt-1.5 leading-relaxed text-ink-soft">
+                  Reviewed rows stay in your own browser's local storage for 24 hours so a refresh doesn't lose work. Wipe them any time with one click.
+                </p>
               </li>
               <li>
                 <h3 className="font-[680]">No bank logins, ever</h3>
@@ -100,7 +113,9 @@ export default function Home() {
               </li>
               <li>
                 <h3 className="font-[680]">Your ledger choices stay with you</h3>
-                <p className="mt-1.5 leading-relaxed text-ink-soft">Counterparty to ledger, per client, saved in your browser so next month is faster.</p>
+                <p className="mt-1.5 leading-relaxed text-ink-soft">
+                  Counterparty-to-ledger choices and loaded Tally masters are saved per client in your browser, so next month is faster.
+                </p>
               </li>
             </ul>
           </div>
@@ -108,18 +123,28 @@ export default function Home() {
 
         <section id="pricing" className="mx-auto max-w-6xl px-5 py-16 sm:px-8">
           <h2 className="text-2xl font-[720] tracking-[-0.02em] sm:text-3xl">Early access pricing</h2>
-          <div className="mt-8 grid gap-6 md:grid-cols-2">
-            <div className="rounded-lg border border-rule-strong bg-sheet p-6">
-              <h3 className="text-lg font-[680]">Pay per statement</h3>
-              <p className="mt-3 text-3xl font-[740]">₹49<span className="text-base font-normal text-ink-soft"> per statement</span></p>
-              <p className="mt-3 leading-relaxed text-ink-soft">Your first 3 statements are free. Good for occasional work and year-end catch-up.</p>
-            </div>
-            <div className="rounded-lg border-2 border-ink bg-sheet p-6">
-              <h3 className="text-lg font-[680]">Practice</h3>
-              <p className="mt-3 text-3xl font-[740]">₹999<span className="text-base font-normal text-ink-soft"> a month</span></p>
-              <p className="mt-3 leading-relaxed text-ink-soft">Up to 100 statements a month, unlimited clients, remembered ledgers per client.</p>
-            </div>
+          <div className="mt-8 grid gap-6 md:grid-cols-3">
+            <PriceCard
+              name="7-Day Catch-Up Pass"
+              price="₹49"
+              unit=""
+              body="Up to 50 pages across multiple statements. First 3 statements free. Built for full-year client ITR and audit catch-up."
+            />
+            <PriceCard
+              name="Prepaid Practice Pack"
+              price="₹299"
+              unit=""
+              body="300 pages, credits never expire. Includes remembered client ledger rules and the WhatsApp Suspense helper."
+            />
+            <PriceCard
+              name="CA Practice Monthly"
+              price="₹499"
+              unit=" / month"
+              featured
+              body="Up to 1,500 pages a month, unlimited clients, Tally masters matching and priority support for new bank layouts."
+            />
           </div>
+          <p className="mt-4 text-sm text-ink-faint">Early-access prices. Payments aren't live yet: join the waitlist below.</p>
         </section>
 
         <section id="waitlist" className="border-t border-rule-strong bg-sheet">
@@ -139,5 +164,18 @@ export default function Home() {
         <p>Tally and TallyPrime are trademarks of Tally Solutions. BahiSync is not affiliated with Tally Solutions.</p>
       </footer>
     </>
+  );
+}
+
+function PriceCard({ name, price, unit, body, featured }: { name: string; price: string; unit: string; body: string; featured?: boolean }) {
+  return (
+    <div className={`rounded-lg bg-sheet p-6 ${featured ? "border-2 border-ink" : "border border-rule-strong"}`}>
+      <h3 className="text-lg font-[680]">{name}</h3>
+      <p className="mt-3 text-3xl font-[740]">
+        {price}
+        {unit && <span className="text-base font-normal text-ink-soft">{unit}</span>}
+      </p>
+      <p className="mt-3 leading-relaxed text-ink-soft">{body}</p>
+    </div>
   );
 }

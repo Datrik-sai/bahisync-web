@@ -43,7 +43,13 @@ class Transaction:
     ledger_source: str = ""  # "client_rule" | "default_rule" | "ai" | "user" | "suspense"
     confidence: float = 0.0
     counterparty: str = ""
+    counterparty_type: str = ""  # "merchant" | "person" | "unknown"
+    occurrence_count: int = 0  # rows in this statement with the same counterparty key
+    match_key: str = ""  # stable key used for client rules and "apply to similar"
+    group: str = ""  # TallyPrime parent group of `ledger`
+    instrument_no: str = ""  # UPI RRN / NEFT-IMPS UTR / cheque number
     voucher_type: str = ""  # Payment | Receipt | Contra
+    note: str = ""  # accountant's or client's note, added to the Tally narration
     flags: list[str] = field(default_factory=list)
 
     @property

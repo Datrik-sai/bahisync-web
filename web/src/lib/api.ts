@@ -13,7 +13,13 @@ export type Txn = {
   ledger_source: "client_rule" | "default_rule" | "ai" | "user" | "party_guess" | "suspense" | "";
   confidence: number;
   counterparty: string;
+  counterparty_type?: "merchant" | "person" | "unknown" | "";
+  occurrence_count?: number;
+  match_key?: string;
+  group?: string;
+  instrument_no?: string;
   voucher_type: string;
+  note?: string;
   flags: string[];
 };
 
@@ -39,6 +45,10 @@ export type Statement = {
   summary: Summary;
   groups: Record<string, string>;
   transactions: Txn[];
+  /** Only on the built-in demo statement. */
+  sample?: boolean;
+  client?: string;
+  client_rules?: ClientRules;
 };
 
 /** direction:counterparty-key -> [ledger, group], remembered per client in the browser. */
@@ -125,12 +135,19 @@ export async function downloadExport(
   kind: "excel" | "ledgers" | "vouchers",
   company: string,
   bankLedger: string,
+  opts: { educationalMode?: boolean; existingLedgers?: string[] } = {},
 ): Promise<void> {
   const url = kind === "excel" ? "/api/export/excel" : `/api/export/tally/${kind}`;
   const res = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ statement, company, bank_ledger: bankLedger }),
+    body: JSON.stringify({
+      statement,
+      company,
+      bank_ledger: bankLedger,
+      educational_mode: Boolean(opts.educationalMode),
+      existing_ledgers: opts.existingLedgers ?? [],
+    }),
   });
   if (!res.ok) throw await errorFrom(res);
   const blob = await res.blob();

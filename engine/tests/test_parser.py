@@ -11,7 +11,7 @@ import pytest
 from bahisync_engine.parser import parse_statement
 from bahisync_engine.pdf_io import PasswordRequired
 
-TEXT_FIXTURES = ["sbi", "hdfc", "icici", "axis", "kotak", "hdfc_password"]
+TEXT_FIXTURES = ["sbi", "hdfc", "icici", "axis", "kotak", "gramin", "hdfc_password"]
 
 
 def squash(s: str) -> str:

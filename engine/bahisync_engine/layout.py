@@ -37,6 +37,11 @@ STOP_PATTERNS = re.compile(
     r"(?i)(closing balance|statement summary|total\b|grand total|page \d+ of \d+|\*\*\s*end of statement|this is a (system|computer) generated)"
 )
 OPENING_PATTERNS = re.compile(r"(?i)(opening balance|balance b/?f|brought forward|b/f)")
+# Lines that repeat on every page of long statements and are never transactions.
+NOISE_PATTERNS = re.compile(
+    r"(?i)(carried\s*forward|balance\s*c/?f|\bc/f\b|page\s*total|transaction\s*total|"
+    r"total\s*(debits?|credits?|withdrawals?|deposits?)|closing balance)"
+)
 
 
 @dataclass
@@ -218,10 +223,17 @@ def extract_rows(pages: list[PageWords]) -> tuple[list[Transaction], Decimal | N
 
         for line in lines[start:]:
             text = " ".join(w.text for w in line)
-            if OPENING_PATTERNS.search(text) and not _line_has_date(line, colmap):
+            has_date = _line_has_date(line, colmap)
+            if OPENING_PATTERNS.search(text) and not has_date:
+                # Only the first one is the statement's opening balance; a
+                # "Brought Forward" on page 2+ is the previous page's closing.
                 bal = _last_amount(line)
-                if bal is not None and opening is None:
+                if bal is not None and opening is None and not drafts:
                     opening = bal
+                continue
+            if not has_date and _is_repeated_header(text):
+                continue
+            if not has_date and NOISE_PATTERNS.search(text) and not re.search(r"(?i)closing balance", text):
                 continue
             if STOP_PATTERNS.search(text) and not _line_has_date(line, colmap):
                 if re.search(r"(?i)closing balance|end of statement|statement summary|grand total", text):
@@ -258,14 +270,27 @@ def extract_rows(pages: list[PageWords]) -> tuple[list[Transaction], Decimal | N
         t = _finalise(n, d, colmap, warnings)
         if t is None:
             continue
-        if OPENING_PATTERNS.search(t.narration) and not t.debit and not t.credit:
-            if opening is None:
-                opening = t.balance
-            continue
+        if not t.debit and not t.credit:
+            # Dated summary rows: "01/04/2026 Opening Balance", "B/F", "C/F", "Page Total".
+            if OPENING_PATTERNS.search(t.narration):
+                if opening is None and not txns:
+                    opening = t.balance
+                continue
+            if NOISE_PATTERNS.search(t.narration):
+                continue
         txns.append(t)
     for i, t in enumerate(txns, start=1):
         t.row_no = i
     return txns, opening, warnings
+
+
+def _is_repeated_header(text: str) -> bool:
+    """A column-header line printed again mid-page (some banks repeat it)."""
+    t = text.lower()
+    if "balance" not in t or "date" not in t:
+        return False
+    hits = sum(1 for _, keys in ROLE_KEYWORDS for k in keys if len(k) > 3 and k in t)
+    return hits >= 3 and not re.search(r"\d[\d,]*\.\d{2}", t)
 
 
 def _line_has_date(line: list[Word], colmap: ColumnMap) -> bool:

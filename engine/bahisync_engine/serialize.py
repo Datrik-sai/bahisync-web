@@ -41,7 +41,13 @@ def txn_from_json(d: dict[str, Any]) -> Transaction:
             ledger_source=str(d.get("ledger_source", "")),
             confidence=float(d.get("confidence", 0.0)),
             counterparty=str(d.get("counterparty", ""))[:200],
+            counterparty_type=str(d.get("counterparty_type", ""))[:20],
+            occurrence_count=int(d.get("occurrence_count", 0) or 0),
+            match_key=str(d.get("match_key", ""))[:80],
+            group=str(d.get("group", ""))[:60],
+            instrument_no=str(d.get("instrument_no", ""))[:40],
             voucher_type=str(d.get("voucher_type", "")),
+            note=str(d.get("note", ""))[:300],
             flags=[str(f) for f in d.get("flags", [])][:20],
         )
     except (KeyError, ValueError, TypeError) as exc:

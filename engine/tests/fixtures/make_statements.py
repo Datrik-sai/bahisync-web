@@ -107,6 +107,9 @@ class Layout:
     page_size: tuple[float, float] = A4
     two_line_header: bool = False
     rows_per_page: int = 22
+    amount_suffix: bool = False  # single Amount column printed as "1,250.00 Dr"
+    page_noise: bool = False  # Page Total / Carried Forward / Brought Forward rows, repeated header
+    print_opening: bool = True
 
 
 LAYOUTS = {
@@ -137,6 +140,15 @@ LAYOUTS = {
         ["AXIS BANK", "IFSC: UTIB0000789", "Customer ID 987654  Account No 912010012345678"],
         [("Tran Date", 30, "l"), ("Particulars", 95, "l"), ("Amount", 430, "r"), ("Dr/Cr", 460, "l"), ("Balance", 570, "r")],
         "%d-%m-%Y", 44, mode="single", newest_first=True, balance_suffix=True, page_size=(600, 842),
+    ),
+    # Regional / Gramin style: one Amount column with Dr/Cr suffix, page totals,
+    # carried/brought forward rows, a repeated header mid-page and no opening line.
+    "gramin": Layout(
+        "gramin",
+        ["Telangana Grameena Bank", "Branch: BHONGIR   IFSC: SBIN0RRDCGB", "Account No: 62012345678"],
+        [("Date", 30, "l"), ("Particulars", 90, "l"), ("Chq No", 320, "l"), ("Amount", 450, "r"), ("Balance", 560, "r")],
+        "%d.%m.%Y", 40, mode="single", amount_suffix=True, balance_suffix=True, page_size=(600, 842),
+        rows_per_page=10, page_noise=True, print_opening=False,
     ),
     "kotak": Layout(
         "kotak",
@@ -178,13 +190,21 @@ def render(layout: Layout, truths: list[Truth], opening: Decimal) -> bytes:
                 y -= 12
                 c.drawString(30, y, line)
             y -= 22
-            if not layout.newest_first:
+            if not layout.newest_first and layout.print_opening:
                 c.setFont("Helvetica", 8)
                 c.drawString(30, y, f"Opening Balance : {inr(opening)}")
                 y -= 18
         y = _header_cells(c, layout, y)
         c.setFont("Helvetica", 7.5)
+        bal_x = next(x for title, x, _ in layout.columns if "balance" in title.lower())
+        if layout.page_noise and p_no > 1:
+            c.drawString(90, y, "Brought Forward")
+            c.drawRightString(bal_x, y, inr(pages[p_no - 2][-1].balance) + (" Cr" if layout.balance_suffix else ""))
+            y -= 14
         for s_no, t in enumerate(page_rows, start=1 + (p_no - 1) * layout.rows_per_page):
+            if layout.page_noise and s_no % layout.rows_per_page == 6:
+                y = _header_cells(c, layout, y)  # header printed again mid-page
+                c.setFont("Helvetica", 7.5)
             lines = textwrap.wrap(t.narration, layout.wrap) or [""]
             for col_title, x, align in layout.columns:
                 key = col_title.lower()
@@ -207,13 +227,23 @@ def render(layout: Layout, truths: list[Truth], opening: Decimal) -> bytes:
                     if t.credit:
                         draw(x, y, inr(t.credit))
                 elif key == "amount":
-                    draw(x, y, inr(t.debit or t.credit))
+                    suffix = (" Dr" if t.debit else " Cr") if layout.amount_suffix else ""
+                    draw(x, y, inr(t.debit or t.credit) + suffix)
                 elif key == "dr/cr":
                     draw(x, y, "DR" if t.debit else "CR")
                 elif "balance" in key:
                     text = inr(t.balance) + (" Cr" if layout.balance_suffix else "")
                     draw(x, y, text)
             y -= 9 * len(lines) + 5
+        if layout.page_noise:
+            dr = sum((t.debit for t in page_rows), Decimal("0"))
+            cr = sum((t.credit for t in page_rows), Decimal("0"))
+            c.drawString(90, y, "Page Total")
+            c.drawRightString(330, y, f"Dr {inr(dr)}")
+            c.drawRightString(450, y, f"{inr(cr)} Cr")
+            y -= 12
+            c.drawString(90, y, "Carried Forward" if p_no < len(pages) else "Transaction Total")
+            c.drawRightString(bal_x, y, inr(page_rows[-1].balance) + (" Cr" if layout.balance_suffix else ""))
         c.setFont("Helvetica", 7)
         c.drawString(30, 30, f"Page {p_no} of {len(pages)}")
         if p_no == len(pages):
@@ -264,6 +294,7 @@ def build_all() -> dict[str, Fixture]:
         ("icici", 13, 26, Decimal("905.10"), "ICICI Bank"),
         ("axis", 14, 28, Decimal("310500.00"), "Axis Bank"),
         ("kotak", 15, 24, Decimal("75000.00"), "Kotak Mahindra Bank"),
+        ("gramin", 16, 30, Decimal("64500.00"), "Telangana Grameena Bank"),
     ]
     out: dict[str, Fixture] = {}
     for name, seed, n, opening, bank in specs:

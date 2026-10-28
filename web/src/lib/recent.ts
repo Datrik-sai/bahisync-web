@@ -6,6 +6,8 @@
  */
 
 import type { ClientRules, Statement } from "./api";
+import sample from "./sample-hdfc.json";
+import type { TallyLedger } from "./tallyMasters";
 
 export type Recent = { id: string; filename: string; client: string; created_at: number };
 export type StoredStatement = { statement: Statement; client: string; clientId: string };
@@ -57,14 +59,37 @@ export function saveStatement(s: StoredStatement): boolean {
   return ok;
 }
 
+export const SAMPLE_ID = "sample-hdfc";
+export const SAMPLE_CLIENT_ID = "c-sample-sri-lakshmi-traders";
+
+/** The built-in demo statement, fresh: no upload, nothing sent anywhere. */
+export function freshSample(): StoredStatement {
+  const st = { ...(sample as unknown as Statement), created_at: Date.now() / 1000 };
+  return { statement: st, client: st.client ?? "Sri Lakshmi Traders", clientId: SAMPLE_CLIENT_ID };
+}
+
 export function loadStatement(id: string): StoredStatement | null {
   recentStatements();
-  return read<StoredStatement | null>(`bahisync.stmt.${id}`, null);
+  const stored = read<StoredStatement | null>(`bahisync.stmt.${id}`, null);
+  if (stored || id !== SAMPLE_ID) return stored;
+  // First visit to the demo: seed it, with last month's remembered rules for this client.
+  const s = freshSample();
+  write(`bahisync.rules.${SAMPLE_CLIENT_ID}`, s.statement.client_rules ?? {});
+  saveStatement(s);
+  return s;
+}
+
+export function resetSample(): StoredStatement {
+  forgetStatement(SAMPLE_ID);
+  remove(`bahisync.rules.${SAMPLE_CLIENT_ID}`);
+  remove(`bahisync.masters.${SAMPLE_CLIENT_ID}`);
+  return loadStatement(SAMPLE_ID) as StoredStatement;
 }
 
 export function forgetStatement(id: string) {
   remove(`bahisync.stmt.${id}`);
   remove(`bahisync.export.${id}`);
+  remove(`bahisync.ask.${id}`);
   write(INDEX, read<Recent[]>(INDEX, []).filter((x) => x.id !== id));
 }
 
@@ -84,10 +109,48 @@ export function setLastClient(name: string) {
   write(CLIENT_KEY, name);
 }
 
-export function exportSettings(id: string): { company: string; bankLedger: string } | null {
-  return read<{ company: string; bankLedger: string } | null>(`bahisync.export.${id}`, null);
+export type ExportSettings = { company: string; bankLedger: string; educationalMode?: boolean };
+
+export function exportSettings(id: string): ExportSettings | null {
+  return read<ExportSettings | null>(`bahisync.export.${id}`, null);
 }
 
-export function saveExportSettings(id: string, s: { company: string; bankLedger: string }) {
+export function saveExportSettings(id: string, s: ExportSettings) {
   write(`bahisync.export.${id}`, s);
+}
+
+/** Ledgers from the client's own Tally (their masters XML), kept per client. */
+export function tallyMasters(clientId: string): TallyLedger[] {
+  return read<TallyLedger[]>(`bahisync.masters.${clientId}`, []);
+}
+
+export function saveTallyMasters(clientId: string, ledgers: TallyLedger[]): boolean {
+  return write(`bahisync.masters.${clientId}`, ledgers);
+}
+
+export function clearTallyMasters(clientId: string) {
+  remove(`bahisync.masters.${clientId}`);
+}
+
+/** Row numbers sent to the client on WhatsApp, in message order, so a reply can be matched later. */
+export function askedRows(id: string): number[] {
+  return read<number[]>(`bahisync.ask.${id}`, []);
+}
+
+export function saveAskedRows(id: string, rows: number[]) {
+  write(`bahisync.ask.${id}`, rows);
+}
+
+/** Remove everything BahiSync keeps in this browser: statements, rules, masters, settings. */
+export function wipeBrowserData() {
+  try {
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith("bahisync.")) keys.push(k);
+    }
+    for (const k of keys) localStorage.removeItem(k);
+  } catch {
+    /* storage blocked: nothing to wipe */
+  }
 }

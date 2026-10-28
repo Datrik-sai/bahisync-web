@@ -37,10 +37,10 @@ MAX_UPLOAD_MB = float(os.environ.get("BAHISYNC_MAX_UPLOAD_MB", "4"))
 TALLY_GROUPS = [
     "Bank Accounts", "Cash-in-Hand", "Sundry Debtors", "Sundry Creditors", "Indirect Expenses", "Direct Expenses",
     "Indirect Incomes", "Direct Incomes", "Duties & Taxes", "Loans (Liability)", "Loans & Advances (Asset)",
-    "Capital Account", "Fixed Assets", "Current Liabilities", "Suspense A/c",
+    "Capital Account", "Fixed Assets", "Current Liabilities", "Bank OD A/c", "Suspense A/c",
 ]
 
-app = FastAPI(title="BahiSync API", version="0.2.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="BahiSync API", version="0.3.0", docs_url=None, redoc_url=None)
 
 
 def _rules(raw: Any) -> ClientRules:
@@ -129,6 +129,8 @@ class ApplyRequest(BaseModel):
     row_no: int
     ledger: str = Field(min_length=1, max_length=120)
     group: str = "Suspense A/c"
+    voucher_type: str | None = Field(None, pattern="^(Payment|Receipt|Contra)$")
+    note: str | None = Field(None, max_length=300)
     apply_to_similar: bool = True
     client_rules: dict[str, Any] = Field(default_factory=dict)
 
@@ -142,7 +144,9 @@ def apply_row(body: ApplyRequest) -> dict[str, Any]:
         raise HTTPException(404, "Row not found.")
     group = body.group if body.group in TALLY_GROUPS else "Suspense A/c"
     client = _rules(body.client_rules)
-    apply_user_choice(target, body.ledger, client, group)
+    if body.note is not None:
+        target.note = body.note.strip()
+    apply_user_choice(target, body.ledger, client, group, body.voucher_type)
     changed = [target.row_no]
     if body.apply_to_similar and target.ledger != SUSPENSE:
         key = counterparty_key(target)
@@ -150,8 +154,12 @@ def apply_row(body: ApplyRequest) -> dict[str, Any]:
             if t is not target and t.direction == target.direction and t.ledger_source != "user" and counterparty_key(t) == key:
                 apply_user_choice(t, target.ledger, None, group)
                 changed.append(t.row_no)
+    # A Tally ledger has one parent group: keep every row on this ledger in step.
+    for t in result.transactions:
+        if t.ledger == target.ledger and t.group != target.group:
+            t.group = target.group
     groups = dict(doc.get("groups") or {})
-    groups[target.ledger] = group
+    groups[target.ledger] = target.group
     return {
         "statement": _payload(result, groups, str(doc.get("filename", "statement.pdf")), float(doc.get("created_at", time.time())), str(doc.get("id", ""))),
         "client_rules": client.to_json(),
@@ -168,6 +176,8 @@ class ExportRequest(BaseModel):
     statement: dict[str, Any]
     company: str = Field("", max_length=120)
     bank_ledger: str = Field("", max_length=120)
+    educational_mode: bool = False  # vouchers: TallyPrime Educational mode dates (1st / 2nd / 31st)
+    existing_ledgers: list[str] = Field(default_factory=list, max_length=20000)  # masters: skip these
 
 
 @app.post("/api/export/excel")
@@ -190,9 +200,12 @@ def export_tally(kind: str, body: ExportRequest) -> Response:
     if kind == "ledgers":
         used = {t.ledger for t in result.transactions if t.ledger}
         groups = {str(k): str(v) for k, v in (body.statement.get("groups") or {}).items()}
-        xml = build_ledger_masters_xml(body.company.strip(), body.bank_ledger.strip(), groups, used)
+        groups.update({t.ledger: t.group for t in result.transactions if t.ledger and t.group})
+        groups = {k: (v if v in TALLY_GROUPS else "Suspense A/c") for k, v in groups.items()}
+        existing = {str(x)[:120] for x in body.existing_ledgers}
+        xml = build_ledger_masters_xml(body.company.strip(), body.bank_ledger.strip(), groups, used, existing)
     else:
-        xml = build_vouchers_xml(result.transactions, body.company.strip(), body.bank_ledger.strip())
+        xml = build_vouchers_xml(result.transactions, body.company.strip(), body.bank_ledger.strip(), body.educational_mode)
     return Response(
         xml,
         media_type="application/xml",

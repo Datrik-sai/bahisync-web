@@ -5,7 +5,7 @@ Bank statement PDF → TallyPrime vouchers, with every row checked against the r
 **Live:** site https://bahisync-web.vercel.app · API https://bahisync-api.vercel.app/api/health
 (Vercel, region bom1; every push to `main` redeploys both projects.)
 
-## What works today (v0.1)
+## What works today (v0.3)
 
 - **Any layout with a column header:** the parser finds Date / Narration / Debit / Credit / Balance
   (and ~60 synonyms) instead of using per-bank templates. Tested on synthetic statements modelled on
@@ -23,6 +23,17 @@ Bank statement PDF → TallyPrime vouchers, with every row checked against the r
 - **Exports:** Tally ledger masters XML, Tally vouchers XML (Payment / Receipt / Contra), Excel.
 - **Privacy:** the server is stateless. PDFs are processed in memory; the extracted rows and remembered
   ledgers live only in the user's browser (statements cleared after 24 hours).
+- **Long statements:** repeated headers, Page Total, Carried / Brought Forward and dated summary rows are
+  skipped; the opening balance is derived from row 1 when it isn't printed. Regional rural banks are
+  detected by name, not by their sponsor bank's IFSC.
+- **UPI awareness:** P2M (merchant) vs P2A (person), how often each counterparty appears, and the
+  RRN / UTR / cheque number, which goes into Tally's bank allocation. One-time UPI names can be sent to
+  Suspense A/c in one click; small one-time merchant spends go to Miscellaneous Expenses.
+- **Review screen:** instant edits in the browser, Tally group and voucher type per row, keyboard
+  shortcuts, client's existing Tally masters loaded from their XML, and a WhatsApp message listing unclear
+  rows with a box to paste the client's reply.
+- **TallyPrime Educational mode** export option (dates moved to the 1st / 2nd, real date kept in the narration).
+- **Sample statement** at `/app/review/sample-hdfc`, no upload needed.
 - **Landing page + waitlist** for the validation phase.
 
 ## Run it
@@ -31,7 +42,7 @@ Bank statement PDF → TallyPrime vouchers, with every row checked against the r
 # Engine + API
 cd engine
 pip install -r requirements-dev.txt     # also needs tesseract-ocr and poppler-utils for scans
-python -m pytest -q                     # 45 tests
+python -m pytest -q                     # 56 tests
 uvicorn service.app:app --reload --port 8000
 
 # Web (new terminal)
@@ -62,7 +73,7 @@ Not yet verified against a live TallyPrime install: do that before charging anyo
 | --- | --- | --- |
 | `BAHISYNC_MAX_UPLOAD_MB` | `4` | Upload size limit (Vercel caps bodies at 4.5 MB) |
 | `ANTHROPIC_API_KEY` | unset | Turns on AI ledger suggestions |
-| `BAHISYNC_AI_MODEL` | `claude-haiku-5-5` | Model for AI suggestions |
+| `BAHISYNC_AI_MODEL` | `claude-haiku-5-5` | Model for AI suggestions (a current Claude model ID) |
 
 Web: `BAHISYNC_API_URL` (build time) points the `/api` rewrite at the engine; `BLOB_READ_WRITE_TOKEN`
 enables the waitlist store (without it, sign-ups go to `web/.data/waitlist.jsonl` locally).

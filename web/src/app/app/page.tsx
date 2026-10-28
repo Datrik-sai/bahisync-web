@@ -86,6 +86,13 @@ export default function UploadPage() {
       <main className="mx-auto max-w-3xl px-5 pb-20 pt-6 sm:px-8">
         <h1 className="text-3xl font-[740] tracking-[-0.02em]">Convert a statement</h1>
         <p className="mt-2 text-ink-soft">Upload one bank statement PDF. You'll review the rows before downloading anything.</p>
+        <Link
+          href="/app/review/sample-hdfc"
+          className="mt-4 inline-block rounded-md border border-ledger bg-ok-bg px-4 py-2 font-semibold text-ok hover:border-ok"
+        >
+          Try instant HDFC sample statement →
+        </Link>
+        <p className="mt-1 text-sm text-ink-faint">No upload: a fictional client's 30-row statement, ready to review.</p>
 
         <form onSubmit={convert} className="mt-8 grid gap-6" noValidate>
           <label className="grid gap-1.5">
@@ -134,7 +141,9 @@ export default function UploadPage() {
             ) : (
               <div>
                 <p className="text-lg font-semibold">Drop the statement PDF here</p>
-                <p className="mt-1 text-sm text-ink-soft">The PDF from net banking, up to {MAX_MB} MB. Password-protected files work too.</p>
+                <p className="mt-1 text-sm text-ink-soft">
+                  The digital PDF from net banking, up to {MAX_MB} MB. Password-protected files work too; scanned PDFs aren't supported yet.
+                </p>
                 <label htmlFor="statement-file" className="mt-4 inline-block cursor-pointer rounded-md border border-ink/30 bg-sheet px-4 py-2 font-semibold hover:border-ink">
                   Choose file
                 </label>
@@ -164,7 +173,7 @@ export default function UploadPage() {
             <button type="submit" disabled={busy} className="rounded-md bg-ink px-6 py-3 font-semibold text-white hover:bg-[#121c40] disabled:opacity-60">
               {busy ? "Reading and checking rows…" : "Convert statement"}
             </button>
-            <span className="text-sm text-ink-faint">The PDF isn't stored. Rows stay in this browser for 24 hours.</span>
+            <span className="text-sm text-ink-faint">The PDF is read in memory and discarded. Reviewed rows stay only in this browser, for 24 hours.</span>
           </div>
         </form>
 
