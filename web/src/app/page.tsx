@@ -5,7 +5,7 @@ import { WaitlistForm } from "@/components/WaitlistForm";
 import { SiteHeader, Wordmark } from "@/components/Wordmark";
 
 const STEPS = [
-  { title: "Upload the PDF", body: "Any Indian bank, including password-protected and scanned statements." },
+  { title: "Upload the PDF", body: "The statement PDF from net banking, from any Indian bank. Password-protected files work too." },
   { title: "Every row is checked", body: "Each row is added to the previous balance. If it doesn't land on the printed balance, it's flagged." },
   { title: "Review only what's flagged", body: "Ledgers come from your past choices for that client. You fix the few rows we're unsure about." },
   { title: "Import into Tally", body: "Download ledger masters and vouchers as XML, or an Excel sheet if you prefer." },
@@ -88,19 +88,19 @@ export default function Home() {
             <ul className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
               <li>
                 <h3 className="font-[680]">The PDF is never stored</h3>
-                <p className="mt-1.5 leading-relaxed text-ink-soft">It's read in memory and discarded. Only the extracted rows are kept.</p>
+                <p className="mt-1.5 leading-relaxed text-ink-soft">It's read in memory to extract the rows, then discarded. Nothing is saved on our servers.</p>
               </li>
               <li>
-                <h3 className="font-[680]">Rows are deleted in 24 hours</h3>
-                <p className="mt-1.5 leading-relaxed text-ink-soft">Or immediately, with one click, once you've downloaded your files.</p>
+                <h3 className="font-[680]">Rows stay in your browser</h3>
+                <p className="mt-1.5 leading-relaxed text-ink-soft">The extracted rows are kept only on your computer, and cleared after 24 hours or when you delete them.</p>
               </li>
               <li>
                 <h3 className="font-[680]">No bank logins, ever</h3>
                 <p className="mt-1.5 leading-relaxed text-ink-soft">We only need the statement. We never ask for net-banking credentials.</p>
               </li>
               <li>
-                <h3 className="font-[680]">Only your ledger choices are remembered</h3>
-                <p className="mt-1.5 leading-relaxed text-ink-soft">Counterparty to ledger, per client, so next month is faster. Delete them anytime.</p>
+                <h3 className="font-[680]">Your ledger choices stay with you</h3>
+                <p className="mt-1.5 leading-relaxed text-ink-soft">Counterparty to ledger, per client, saved in your browser so next month is faster.</p>
               </li>
             </ul>
           </div>

@@ -1,0 +1,6 @@
+tests/
+data/
+samples/
+Dockerfile
+requirements-dev.txt
+__pycache__/

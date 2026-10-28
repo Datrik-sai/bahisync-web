@@ -9,11 +9,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY bahisync_engine ./bahisync_engine
-COPY api ./api
+COPY service ./service
+COPY index.py .
 
-ENV BAHISYNC_DATA_DIR=/data
-VOLUME ["/data"]
 EXPOSE 8000
-RUN useradd --create-home app && mkdir -p /data && chown app /data
+RUN useradd --create-home app
 USER app
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "service.app:app", "--host", "0.0.0.0", "--port", "8000"]

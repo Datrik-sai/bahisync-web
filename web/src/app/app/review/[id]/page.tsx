@@ -1,13 +1,6 @@
 import { ReviewScreen } from "./ReviewScreen";
 
-export default async function ReviewPage({
-  params,
-  searchParams,
-}: {
-  params: Promise<{ id: string }>;
-  searchParams: Promise<{ client?: string }>;
-}) {
+export default async function ReviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { client } = await searchParams;
-  return <ReviewScreen id={id} clientName={client ?? ""} />;
+  return <ReviewScreen id={id} />;
 }

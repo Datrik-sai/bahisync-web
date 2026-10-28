@@ -12,7 +12,7 @@ export function LedgerStrip() {
   return (
     <div className="overflow-hidden rounded-lg border border-rule-strong bg-sheet">
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_17rem]">
-        <div className="overflow-x-auto">
+        <div className="relative overflow-x-auto">
           <table className="w-full min-w-[38rem] border-collapse text-[0.82rem]">
             <caption className="sr-only">Sample statement rows checked against the running balance</caption>
             <thead>

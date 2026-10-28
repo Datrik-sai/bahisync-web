@@ -6,22 +6,20 @@ import { useEffect, useMemo, useState } from "react";
 
 import { SiteHeader } from "@/components/Wordmark";
 import {
-  ApiError,
-  deleteStatement,
-  exportUrl,
+  applyLedger,
+  downloadExport,
   formatDate,
   getLedgers,
-  getStatement,
   money,
   moneyAlways,
-  updateRow,
   type LedgerOption,
   type Statement,
   type Txn,
 } from "@/lib/api";
-import { exportSettings, forgetStatement, saveExportSettings } from "@/lib/recent";
+import { clientRules, exportSettings, forgetStatement, loadStatement, saveClientRules, saveExportSettings, saveStatement } from "@/lib/recent";
 
 type Filter = "all" | "review" | "suspense" | "mismatch";
+type ExportKind = "ledgers" | "vouchers" | "excel";
 
 const SOURCE_LABEL: Record<string, string> = {
   client_rule: "Remembered",
@@ -32,9 +30,11 @@ const SOURCE_LABEL: Record<string, string> = {
   suspense: "Unknown",
 };
 
-export function ReviewScreen({ id, clientName }: { id: string; clientName: string }) {
+export function ReviewScreen({ id }: { id: string }) {
   const router = useRouter();
   const [st, setSt] = useState<Statement | null>(null);
+  const [clientName, setClientName] = useState("");
+  const [clientId, setClientId] = useState("");
   const [loadError, setLoadError] = useState("");
   const [options, setOptions] = useState<LedgerOption[]>([]);
   const [groups, setGroups] = useState<string[]>([]);
@@ -43,23 +43,33 @@ export function ReviewScreen({ id, clientName }: { id: string; clientName: strin
   const [notice, setNotice] = useState("");
   const [company, setCompany] = useState("");
   const [bankLedger, setBankLedger] = useState("");
+  const [exporting, setExporting] = useState<ExportKind | null>(null);
+  const [exportError, setExportError] = useState("");
 
   useEffect(() => {
-    getStatement(id)
-      .then((s) => {
-        setSt(s);
-        const saved = exportSettings(id);
-        setCompany(saved?.company ?? clientName);
-        const hint = s.summary.account_hint ? ` ${s.summary.account_hint}` : "";
-        setBankLedger(saved?.bankLedger ?? `${s.summary.bank === "Unknown bank" ? "Bank" : s.summary.bank}${hint}`);
-        return getLedgers(s.client_id);
-      })
+    const stored = loadStatement(id);
+    if (!stored) {
+      setLoadError("gone");
+      return;
+    }
+    const s = stored.statement;
+    setSt(s);
+    setClientName(stored.client);
+    setClientId(stored.clientId);
+    const saved = exportSettings(id);
+    setCompany(saved?.company ?? stored.client);
+    const hint = s.summary.account_hint ? ` ${s.summary.account_hint}` : "";
+    setBankLedger(saved?.bankLedger ?? `${s.summary.bank === "Unknown bank" ? "Bank" : s.summary.bank}${hint}`);
+    const remembered = Object.values(clientRules(stored.clientId)).map(([name, group]) => ({ name, group }));
+    getLedgers()
       .then((l) => {
-        setOptions(l.ledgers);
+        const byName = new Map<string, LedgerOption>();
+        for (const o of [...l.ledgers, ...remembered]) byName.set(o.name, o);
+        setOptions([...byName.values()].sort((a, b) => a.name.localeCompare(b.name)));
         setGroups(l.groups);
       })
-      .catch((e) => setLoadError(e instanceof ApiError && e.status === 404 ? "gone" : "error"));
-  }, [id, clientName]);
+      .catch(() => setNotice("Couldn't load the ledger list. You can still type ledger names."));
+  }, [id]);
 
   const counts = useMemo(() => {
     const t = st?.transactions ?? [];
@@ -80,9 +90,12 @@ export function ReviewScreen({ id, clientName }: { id: string; clientName: strin
   }, [st, filter]);
 
   async function saveLedger(t: Txn, ledger: string, group: string) {
+    if (!st) return;
     try {
-      const res = await updateRow(id, t.row_no, ledger, group, applySimilar);
-      setSt(res);
+      const res = await applyLedger(st, t.row_no, ledger, group, applySimilar, clientRules(clientId));
+      setSt(res.statement);
+      saveStatement({ statement: res.statement, client: clientName, clientId });
+      saveClientRules(clientId, res.client_rules);
       if (!options.some((o) => o.name === ledger)) setOptions((o) => [...o, { name: ledger, group }].sort((a, b) => a.name.localeCompare(b.name)));
       const others = res.changed_rows.length - 1;
       setNotice(others > 0 ? `Set ${ledger} on this row and ${others} similar row${others > 1 ? "s" : ""}.` : `Set ${ledger}.`);
@@ -91,8 +104,20 @@ export function ReviewScreen({ id, clientName }: { id: string; clientName: strin
     }
   }
 
-  async function removeNow() {
-    await deleteStatement(id).catch(() => undefined);
+  async function exportFile(kind: ExportKind) {
+    if (!st) return;
+    setExporting(kind);
+    setExportError("");
+    try {
+      await downloadExport(st, kind, company.trim(), bankLedger.trim());
+    } catch {
+      setExportError("Couldn't create the file. Check your connection and try again.");
+    } finally {
+      setExporting(null);
+    }
+  }
+
+  function removeNow() {
     forgetStatement(id);
     router.push("/app");
   }
@@ -105,7 +130,7 @@ export function ReviewScreen({ id, clientName }: { id: string; clientName: strin
           <h1 className="text-2xl font-[720]">{loadError === "gone" ? "This statement has been deleted" : "Couldn't load this statement"}</h1>
           <p className="mt-3 text-ink-soft">
             {loadError === "gone"
-              ? "Statements are removed 24 hours after upload, or when you delete them. Upload the PDF again to continue."
+              ? "Statements stay in this browser for 24 hours, or until you delete them. Upload the PDF again to continue."
               : "Check your connection and reload the page."}
           </p>
           <Link href="/app" className="mt-6 inline-block rounded-md bg-ink px-5 py-2.5 font-semibold text-white">Upload a statement</Link>
@@ -187,7 +212,7 @@ export function ReviewScreen({ id, clientName }: { id: string; clientName: strin
             </div>
             <p className="mt-2 min-h-5 text-sm text-ledger" aria-live="polite">{notice}</p>
 
-            <div className="mt-2 overflow-x-auto rounded-lg border border-rule-strong bg-sheet">
+            <div className="relative mt-2 overflow-x-auto rounded-lg border border-rule-strong bg-sheet">
               <table className="w-full min-w-[60rem] table-fixed border-collapse text-[0.84rem]">
                 <thead>
                   <tr className="border-b border-rule-strong text-left text-ink-soft">
@@ -247,20 +272,21 @@ export function ReviewScreen({ id, clientName }: { id: string; clientName: strin
 
             <ol className="mt-5 grid gap-3">
               <li>
-                <DownloadLink disabled={!exportReady} href={exportUrl(id, "ledgers", company, bankLedger)} label="1. Ledger masters (XML)" />
+                <DownloadButton disabled={!exportReady} busy={exporting === "ledgers"} onClick={() => exportFile("ledgers")} label="1. Ledger masters (XML)" />
                 <p className="mt-1 text-xs text-ink-faint">In TallyPrime: Import, then Masters. Creates any ledger that doesn't exist yet.</p>
               </li>
               <li>
-                <DownloadLink disabled={!exportReady} href={exportUrl(id, "vouchers", company, bankLedger)} label="2. Vouchers (XML)" primary />
+                <DownloadButton disabled={!exportReady} busy={exporting === "vouchers"} onClick={() => exportFile("vouchers")} label="2. Vouchers (XML)" primary />
                 <p className="mt-1 text-xs text-ink-faint">Then Import, then Transactions. Payment, Receipt and Contra entries.</p>
               </li>
               <li>
-                <DownloadLink href={exportUrl(id, "excel", company, bankLedger)} label="Excel sheet" />
+                <DownloadButton busy={exporting === "excel"} onClick={() => exportFile("excel")} label="Excel sheet" />
               </li>
             </ol>
+            <p className="mt-2 min-h-5 text-sm text-mismatch" aria-live="polite">{exportError}</p>
 
             <div className="mt-6 border-t border-rule pt-4 text-sm text-ink-soft">
-              <p>This statement is deleted automatically 24 hours after upload.</p>
+              <p>This statement is kept only in this browser and cleared 24 hours after upload.</p>
               <button onClick={removeNow} className="mt-2 font-semibold text-mismatch underline underline-offset-4">Delete it now</button>
             </div>
           </aside>
@@ -294,15 +320,28 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function DownloadLink({ href, label, disabled, primary }: { href: string; label: string; disabled?: boolean; primary?: boolean }) {
-  const base = "block rounded-md px-4 py-2.5 text-center font-semibold";
-  if (disabled) {
-    return <span className={`${base} cursor-not-allowed border border-rule-strong text-ink-faint`} aria-disabled>{label}</span>;
-  }
+function DownloadButton({
+  label,
+  onClick,
+  disabled,
+  busy,
+  primary,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  busy?: boolean;
+  primary?: boolean;
+}) {
+  const tone = disabled
+    ? "cursor-not-allowed border border-rule-strong text-ink-faint"
+    : primary
+      ? "bg-ink text-white hover:bg-[#121c40]"
+      : "border border-ink/30 text-ink hover:border-ink";
   return (
-    <a href={href} download className={`${base} ${primary ? "bg-ink text-white hover:bg-[#121c40]" : "border border-ink/30 text-ink hover:border-ink"}`}>
-      {label}
-    </a>
+    <button type="button" onClick={onClick} disabled={disabled || busy} className={`block w-full rounded-md px-4 py-2.5 text-center font-semibold ${tone} disabled:opacity-70`}>
+      {busy ? "Preparing…" : label}
+    </button>
   );
 }
 

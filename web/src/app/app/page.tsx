@@ -5,10 +5,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import { SiteHeader } from "@/components/Wordmark";
-import { ApiError, clientIdFor, uploadStatement } from "@/lib/api";
-import { lastClient, recentStatements, rememberStatement, setLastClient, type Recent } from "@/lib/recent";
-
-const MAX_MB = 15;
+import { ApiError, MAX_UPLOAD_MB as MAX_MB, clientIdFor, parseStatement } from "@/lib/api";
+import { clientRules, lastClient, recentStatements, saveStatement, setLastClient, type Recent } from "@/lib/recent";
 
 export default function UploadPage() {
   const router = useRouter();
@@ -60,10 +58,15 @@ export default function UploadPage() {
     setBusy(true);
     setError("");
     try {
-      const st = await uploadStatement(file, clientIdFor(client), password || undefined);
+      const clientId = clientIdFor(client);
+      const st = await parseStatement(file, clientRules(clientId), password || undefined);
       setLastClient(client.trim());
-      rememberStatement({ id: st.id, filename: st.filename, client: client.trim(), created_at: st.created_at });
-      router.push(`/app/review/${st.id}?client=${encodeURIComponent(client.trim())}`);
+      if (!saveStatement({ statement: st, client: client.trim(), clientId })) {
+        setError("Your browser's storage is full or blocked, so the statement can't be kept for review. Clear old site data or leave private mode.");
+        setBusy(false);
+        return;
+      }
+      router.push(`/app/review/${st.id}`);
     } catch (err) {
       if (err instanceof ApiError && err.code === "password_required") {
         setNeedsPassword(true);
@@ -131,7 +134,7 @@ export default function UploadPage() {
             ) : (
               <div>
                 <p className="text-lg font-semibold">Drop the statement PDF here</p>
-                <p className="mt-1 text-sm text-ink-soft">Password-protected and scanned statements work too</p>
+                <p className="mt-1 text-sm text-ink-soft">The PDF from net banking, up to {MAX_MB} MB. Password-protected files work too.</p>
                 <label htmlFor="statement-file" className="mt-4 inline-block cursor-pointer rounded-md border border-ink/30 bg-sheet px-4 py-2 font-semibold hover:border-ink">
                   Choose file
                 </label>
@@ -161,7 +164,7 @@ export default function UploadPage() {
             <button type="submit" disabled={busy} className="rounded-md bg-ink px-6 py-3 font-semibold text-white hover:bg-[#121c40] disabled:opacity-60">
               {busy ? "Reading and checking rows…" : "Convert statement"}
             </button>
-            <span className="text-sm text-ink-faint">Rows are deleted automatically after 24 hours.</span>
+            <span className="text-sm text-ink-faint">The PDF isn't stored. Rows stay in this browser for 24 hours.</span>
           </div>
         </form>
 
@@ -171,7 +174,7 @@ export default function UploadPage() {
             <ul className="mt-3 divide-y divide-rule rounded-lg border border-rule-strong bg-sheet">
               {recent.map((r) => (
                 <li key={r.id}>
-                  <Link href={`/app/review/${r.id}?client=${encodeURIComponent(r.client)}`} className="flex items-center justify-between px-4 py-3 hover:bg-paper">
+                  <Link href={`/app/review/${r.id}`} className="flex items-center justify-between px-4 py-3 hover:bg-paper">
                     <span className="font-medium">{r.filename}</span>
                     <span className="text-sm text-ink-faint">{r.client}</span>
                   </Link>

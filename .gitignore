@@ -19,3 +19,7 @@ web/.env*.local
 
 .env
 .DS_Store
+
+# Local waitlist file in development
+web/.data/
+.vercel/

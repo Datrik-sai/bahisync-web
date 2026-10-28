@@ -34,16 +34,19 @@ export type Summary = {
 
 export type Statement = {
   id: string;
-  client_id: string;
   filename: string;
   created_at: number;
-  expires_in_hours: number;
   summary: Summary;
   groups: Record<string, string>;
   transactions: Txn[];
 };
 
+/** direction:counterparty-key -> [ledger, group], remembered per client in the browser. */
+export type ClientRules = Record<string, [string, string]>;
+
 export type LedgerOption = { name: string; group: string };
+
+export const MAX_UPLOAD_MB = 4;
 
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string) {
@@ -51,62 +54,63 @@ export class ApiError extends Error {
   }
 }
 
-async function handle<T>(res: Response): Promise<T> {
-  if (res.ok) return res.json() as Promise<T>;
+async function errorFrom(res: Response): Promise<ApiError> {
   let code = "error";
   let message = `Request failed (${res.status}).`;
   try {
     const body = await res.json();
     const d = body.detail;
     if (typeof d === "string") message = d;
-    else if (d && typeof d === "object") {
+    else if (d && typeof d === "object" && !Array.isArray(d)) {
       code = d.code ?? code;
       message = d.message ?? message;
     }
   } catch {
-    /* non-JSON error */
+    if (res.status === 413) {
+      code = "too_large";
+      message = `This file is over ${MAX_UPLOAD_MB} MB. Split the statement by month and upload each part.`;
+    }
   }
-  throw new ApiError(res.status, code, message);
+  return new ApiError(res.status, code, message);
 }
 
-export async function uploadStatement(file: File, clientId: string, password?: string): Promise<Statement> {
+async function json<T>(res: Response): Promise<T> {
+  if (!res.ok) throw await errorFrom(res);
+  return res.json() as Promise<T>;
+}
+
+export async function parseStatement(file: File, rules: ClientRules, password?: string): Promise<Statement> {
   const form = new FormData();
   form.append("file", file);
-  form.append("client_id", clientId);
+  form.append("filename", file.name);
+  form.append("client_rules", JSON.stringify(rules));
   if (password) form.append("password", password);
-  return handle(await fetch("/api/statements", { method: "POST", body: form }));
+  return json(await fetch("/api/parse", { method: "POST", body: form }));
 }
 
-export async function getStatement(id: string): Promise<Statement> {
-  return handle(await fetch(`/api/statements/${encodeURIComponent(id)}`, { cache: "no-store" }));
-}
-
-export async function updateRow(
-  id: string,
+export async function applyLedger(
+  statement: Statement,
   rowNo: number,
   ledger: string,
   group: string,
   applyToSimilar: boolean,
-): Promise<Statement & { changed_rows: number[] }> {
-  return handle(
-    await fetch(`/api/statements/${encodeURIComponent(id)}/rows/${rowNo}`, {
-      method: "PATCH",
+  rules: ClientRules,
+): Promise<{ statement: Statement; client_rules: ClientRules; changed_rows: number[] }> {
+  return json(
+    await fetch("/api/rows/apply", {
+      method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ledger, group, apply_to_similar: applyToSimilar }),
+      body: JSON.stringify({ statement, row_no: rowNo, ledger, group, apply_to_similar: applyToSimilar, client_rules: rules }),
     }),
   );
 }
 
-export async function deleteStatement(id: string): Promise<void> {
-  await handle(await fetch(`/api/statements/${encodeURIComponent(id)}`, { method: "DELETE" }));
-}
-
-export async function getLedgers(clientId: string): Promise<{ ledgers: LedgerOption[]; groups: string[] }> {
-  return handle(await fetch(`/api/ledgers?client_id=${encodeURIComponent(clientId)}`, { cache: "no-store" }));
+export async function getLedgers(): Promise<{ ledgers: LedgerOption[]; groups: string[] }> {
+  return json(await fetch("/api/ledgers"));
 }
 
 export async function joinWaitlist(email: string, role: string, statements: string): Promise<void> {
-  await handle(
+  await json(
     await fetch("/api/waitlist", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -115,17 +119,37 @@ export async function joinWaitlist(email: string, role: string, statements: stri
   );
 }
 
-export function exportUrl(id: string, kind: "excel" | "ledgers" | "vouchers", company: string, bankLedger: string): string {
-  const base = `/api/statements/${encodeURIComponent(id)}/export`;
-  if (kind === "excel") return `${base}/excel`;
-  const q = new URLSearchParams({ kind, company, bank_ledger: bankLedger });
-  return `${base}/tally?${q}`;
+/** Build an export on the server from the browser's copy and save it as a file. */
+export async function downloadExport(
+  statement: Statement,
+  kind: "excel" | "ledgers" | "vouchers",
+  company: string,
+  bankLedger: string,
+): Promise<void> {
+  const url = kind === "excel" ? "/api/export/excel" : `/api/export/tally/${kind}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ statement, company, bank_ledger: bankLedger }),
+  });
+  if (!res.ok) throw await errorFrom(res);
+  const blob = await res.blob();
+  const match = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "");
+  const name = match?.[1] ?? (kind === "excel" ? "statement.xlsx" : `statement_tally_${kind}.xml`);
+  const href = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = href;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(href), 1000);
 }
 
 /** Client names become stable ids so ledger choices are remembered per client. */
 export function clientIdFor(name: string): string {
   const slug = name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 50);
-  return `c-${slug || "default"}`.padEnd(6, "x");
+  return `c-${slug || "default"}`;
 }
 
 const inr = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });

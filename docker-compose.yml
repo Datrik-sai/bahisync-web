@@ -3,10 +3,8 @@ services:
   api:
     build: ./engine
     environment:
-      BAHISYNC_ALLOWED_ORIGINS: http://localhost:3000
+      BAHISYNC_MAX_UPLOAD_MB: "15"
       # ANTHROPIC_API_KEY: sk-ant-...   # optional: AI ledger suggestions
-    volumes:
-      - bahisync-data:/data
     ports:
       - "8000:8000"
   web:
@@ -20,5 +18,3 @@ services:
       - "3000:3000"
     depends_on:
       - api
-volumes:
-  bahisync-data:

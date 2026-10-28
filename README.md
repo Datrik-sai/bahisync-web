@@ -8,7 +8,8 @@ Bank statement PDF → TallyPrime vouchers, with every row checked against the r
   (and ~60 synonyms) instead of using per-bank templates. Tested on synthetic statements modelled on
   SBI, HDFC, ICICI, Axis and Kotak layouts.
 - **Password-protected PDFs:** the password is asked for, used once and never stored.
-- **Scanned PDFs:** OCR with Tesseract, then the same balance check catches misreads.
+- **Scanned PDFs:** OCR with Tesseract when it is installed (Docker image, local). Not available on Vercel,
+  where scanned files get a clear message instead.
 - **Balance check:** each row must equal previous balance + credit − debit. Newest-first statements
   are detected and reordered. Single "Amount + Dr/Cr" columns and "Cr/Dr" balance suffixes are handled.
 - **Ledger suggestions:** remembered per client from your corrections, then built-in rules (ATM/cash,
@@ -17,7 +18,8 @@ Bank statement PDF → TallyPrime vouchers, with every row checked against the r
 - **Review screen:** filter to rows needing review, Suspense or balance mismatches; one correction can
   apply to similar rows in the statement and is remembered for next month.
 - **Exports:** Tally ledger masters XML, Tally vouchers XML (Payment / Receipt / Contra), Excel.
-- **Privacy:** PDFs are processed in memory; parsed rows auto-delete after 24 hours or on demand.
+- **Privacy:** the server is stateless. PDFs are processed in memory; the extracted rows and remembered
+  ledgers live only in the user's browser (statements cleared after 24 hours).
 - **Landing page + waitlist** for the validation phase.
 
 ## Run it
@@ -26,8 +28,8 @@ Bank statement PDF → TallyPrime vouchers, with every row checked against the r
 # Engine + API
 cd engine
 pip install -r requirements-dev.txt     # also needs tesseract-ocr and poppler-utils for scans
-python -m pytest -q                     # 44 tests
-uvicorn api.main:app --reload --port 8000
+python -m pytest -q                     # 45 tests
+uvicorn service.app:app --reload --port 8000
 
 # Web (new terminal)
 cd web
@@ -55,14 +57,12 @@ Not yet verified against a live TallyPrime install: do that before charging anyo
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `BAHISYNC_DATA_DIR` | `engine/data` | Where parsed rows, client rules and the waitlist are stored |
-| `BAHISYNC_RETENTION_HOURS` | `24` | Auto-delete window for parsed statements |
-| `BAHISYNC_MAX_UPLOAD_MB` | `15` | Upload size limit |
-| `BAHISYNC_ALLOWED_ORIGINS` | `http://localhost:3000` | CORS origins (comma-separated) |
+| `BAHISYNC_MAX_UPLOAD_MB` | `4` | Upload size limit (Vercel caps bodies at 4.5 MB) |
 | `ANTHROPIC_API_KEY` | unset | Turns on AI ledger suggestions |
 | `BAHISYNC_AI_MODEL` | `claude-haiku-5-5` | Model for AI suggestions |
 
-Web: `BAHISYNC_API_URL` (build time) points the `/api` rewrite at the engine.
+Web: `BAHISYNC_API_URL` (build time) points the `/api` rewrite at the engine; `BLOB_READ_WRITE_TOKEN`
+enables the waitlist store (without it, sign-ups go to `web/.data/waitlist.jsonl` locally).
 
 ## Before launch (not built yet, on purpose)
 
@@ -70,7 +70,7 @@ Web: `BAHISYNC_API_URL` (build time) points the `/api` rewrite at the engine.
 - [ ] Import the generated XML into a TallyPrime trial (Educational mode) and fix anything it rejects.
 - [ ] Login (Supabase Auth or similar) so clients and rules are per account, not per browser.
 - [ ] Payments (Razorpay): per-statement credits and the monthly plan.
-- [ ] Move storage from files to Postgres (swap `api/store.py`).
+- [ ] Accounts + a database so remembered ledgers follow the user across devices (today they live in one browser).
 - [ ] Rate limiting and an abuse cap on the upload endpoint.
 - [ ] Privacy policy and terms pages (DPDP-ready), and a contact email.
 - [ ] Error monitoring that never captures statement contents.

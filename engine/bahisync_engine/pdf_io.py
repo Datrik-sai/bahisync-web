@@ -24,6 +24,10 @@ class UnreadablePDF(Exception):
     pass
 
 
+class ScannedUnsupported(Exception):
+    """A scanned PDF arrived but OCR tools (tesseract/poppler) aren't installed."""
+
+
 @dataclass
 class PageWords:
     page: int
@@ -69,7 +73,18 @@ def read_words(pdf_bytes: bytes, ocr: bool = True) -> tuple[list[PageWords], boo
     if sum(len(p.words) for p in pages) >= 20 or not ocr:
         return pages, False, first_text
 
+    if not ocr_available():
+        raise ScannedUnsupported(
+            "This looks like a scanned statement. Scanned PDFs aren't supported online yet; "
+            "download the statement from net banking as a PDF instead."
+        )
     return _ocr_pages(pdf_bytes)
+
+
+def ocr_available() -> bool:
+    import shutil
+
+    return bool(shutil.which("tesseract") and shutil.which("pdftoppm"))
 
 
 def _ocr_pages(pdf_bytes: bytes) -> tuple[list[PageWords], bool, str]:
