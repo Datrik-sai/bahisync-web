@@ -336,6 +336,54 @@ def render_hsbc(truths: list[Truth], opening: Decimal) -> bytes:
     return buf.getvalue()
 
 
+def render_icici_ruled(truths: list[Truth]) -> bytes:
+    """ICICI net-banking 'OpTransactionHistory' style: a three-line header
+    ("Transaction / Date", "Withdrawal / Amount / (INR)"), a rule under every row,
+    a bold title line above each row's date, remarks starting well left of their
+    centred header, an empty Cheque Number column and a legends footer."""
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=(595, 842))
+    H = 842
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(60, H - 100, "Statement of Transactions in Saving Account no. 000801637972 in INR")
+    c.setFont("Helvetica", 7)
+    c.drawString(400, H - 131, "Your Base Branch: ICICI BANK LIMITED, HYDERABAD")
+    c.setFont("Helvetica-Bold", 6.5)
+    top = H - 217
+    for text, x, dy in [("Transaction", 60, 0), ("Withdrawal", 399, 0), ("Deposit", 474, 0), ("Balance", 532, 0),
+                        ("S No.", 24, 5), ("Cheque Number", 122, 5), ("Transaction Remarks", 247, 5),
+                        ("Date", 74, 10), ("Amount (INR)", 396, 10), ("Amount (INR)", 462, 10), ("(INR)", 538, 10)]:
+        c.drawString(x, top - dy, text)
+    y = H - 240
+    c.line(18, y, 575, y)
+    titles = {"credit": "DATRIK SAI", "debit": "Debit trxn"}
+    for n, t in enumerate(truths, start=1):
+        lines = textwrap.wrap(t.narration, 46) or [""]
+        c.setFont("Helvetica-Bold", 6.5)
+        c.drawString(192, y - 8, titles["credit" if t.credit else "debit"])
+        c.setFont("Helvetica", 6.5)
+        anchor = y - 13
+        c.drawString(30, anchor, str(n))
+        c.drawString(61, anchor, t.txn_date.strftime("%d.%m.%Y"))
+        if t.debit:
+            c.drawRightString(444, anchor, f"{t.debit:.2f}")
+        else:
+            c.drawRightString(506, anchor, f"{t.credit:.2f}")
+        c.drawRightString(570, anchor, f"{t.balance:.2f}")
+        for k, line in enumerate(lines):
+            c.drawString(192, y - 18 - 10 * k, line)
+        y -= 18 + 10 * len(lines)
+        c.line(18, y, 575, y)
+    c.setFont("Helvetica", 7)
+    c.drawString(19, y - 24, "Sincerly,")
+    c.drawString(19, y - 42, "Team ICICI Bank")
+    c.drawString(196, y - 120, "Legends for transactions in your Account Statement")
+    c.drawString(25, y - 144, "RCHG - Recharge   PAVC - Pay any Visa credit card   SMO - Smart Money Order")
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
 def encrypt(pdf_bytes: bytes, password: str) -> bytes:
     out = io.BytesIO()
     with pikepdf.open(io.BytesIO(pdf_bytes)) as pdf:
@@ -400,6 +448,9 @@ def build_all() -> dict[str, Fixture]:
     hs = make_truths(19, 9, Decimal("289.41"))
     out["hsbc"] = Fixture("hsbc", render_hsbc(hs, Decimal("289.41")), hs, Decimal("289.41"), expected_bank="HSBC")
     out["hsbc_scanned"] = Fixture("hsbc_scanned", rasterise(out["hsbc"].pdf), hs, Decimal("289.41"), expected_bank="HSBC")
+
+    ic = make_truths(20, 14, Decimal("4.44"))
+    out["icici_ruled"] = Fixture("icici_ruled", render_icici_ruled(ic), ic, Decimal("4.44"), expected_bank="ICICI Bank")
 
     hd = out["hdfc"]
     out["hdfc_password"] = Fixture("hdfc_password", encrypt(hd.pdf, "SAI1990"), hd.truths, hd.opening, "SAI1990", hd.expected_bank)

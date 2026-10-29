@@ -9,6 +9,17 @@ from .models import ParseResult
 from .pdf_io import decrypt, read_words
 
 
+def _header_text(first_text: str) -> str:
+    """Page-1 text above the transaction table. Narrations below it carry other
+    banks' IFSCs and names (a payee's KKBK... IFSC is not the account's bank)."""
+    lines = first_text.splitlines()
+    for i, line in enumerate(lines):
+        low = line.lower()
+        if "balance" in low and ("date" in low or "debit" in low or "withdraw" in low):
+            return "\n".join(lines[:i]) or first_text
+    return first_text
+
+
 def parse_statement(pdf_bytes: bytes, password: str | None = None, ocr: bool = True) -> ParseResult:
     clear = decrypt(pdf_bytes, password)
     pages, used_ocr, first_text = read_words(clear, ocr=ocr)
@@ -20,7 +31,7 @@ def parse_statement(pdf_bytes: bytes, password: str | None = None, ocr: bool = T
     if not txns and not warnings:
         warnings.append("No transactions found.")
     return ParseResult(
-        bank=detect_bank(first_text),
+        bank=detect_bank(_header_text(first_text)),
         account_hint=account_hint(first_text),
         transactions=txns,
         opening_balance=opening,

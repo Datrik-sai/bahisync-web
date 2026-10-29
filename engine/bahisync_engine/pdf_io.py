@@ -14,7 +14,7 @@ OCR engines, in order:
 from __future__ import annotations
 
 import io
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pdfplumber
 import pikepdf
@@ -39,6 +39,22 @@ class PageWords:
     page: int
     width: float
     words: list[Word]
+    rules: list[float] = field(default_factory=list)  # y of horizontal table rules (text PDFs only)
+
+
+def _horizontal_rules(page) -> list[float]:
+    """Row separators drawn as lines or thin rectangles across most of the table."""
+    ys: list[float] = []
+    try:
+        edges = page.horizontal_edges
+    except Exception:
+        return ys
+    for e in edges:
+        if float(e["x1"]) - float(e["x0"]) >= 0.3 * float(page.width):
+            y = round(float(e["top"]), 1)
+            if not ys or all(abs(y - v) > 1.5 for v in ys):
+                ys.append(y)
+    return sorted(ys)
 
 
 def decrypt(pdf_bytes: bytes, password: str | None) -> bytes:
@@ -72,7 +88,7 @@ def read_words(pdf_bytes: bytes, ocr: bool = True) -> tuple[list[PageWords], boo
                 Word(w["text"], float(w["x0"]), float(w["x1"]), float(w["top"]), float(w["bottom"]), i)
                 for w in raw
             ]
-            pages.append(PageWords(i, float(page.width), words))
+            pages.append(PageWords(i, float(page.width), words, _horizontal_rules(page)))
             if i == 1:
                 first_text = page.extract_text() or ""
 

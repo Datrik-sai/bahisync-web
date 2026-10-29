@@ -119,3 +119,17 @@ def test_image_only_statement_is_read_with_ocr(fixtures):
     for got, want in zip(r.transactions, fx.truths):
         assert (got.txn_date, got.debit, got.credit, got.balance) == (want.txn_date, want.debit, want.credit, want.balance)
     assert r.balance_verified
+
+
+def test_icici_ruled_rows_three_line_header(fixtures):
+    """ICICI: header over three lines, a rule under every row, a bold title above
+    the date, remarks left of their centred header, legends after the table."""
+    fx = fixtures["icici_ruled"]
+    r = parse_statement(fx.pdf)
+    assert r.balance_verified and r.rows_total == len(fx.truths) and r.bank == "ICICI Bank"
+    for got, want in zip(r.transactions, fx.truths):
+        assert (got.txn_date, got.debit, got.credit, got.balance) == (want.txn_date, want.debit, want.credit, want.balance)
+        title = "DATRIKSAI" if want.credit else "debittrxn"
+        assert squash(got.narration) == (title + squash(want.narration)).lower()
+        assert got.ref == ""  # the empty Cheque Number column takes none of the remarks
+    assert not any("legends" in t.narration.lower() or "sincerly" in t.narration.lower() for t in r.transactions)

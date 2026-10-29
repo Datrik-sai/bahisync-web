@@ -56,7 +56,7 @@ DEFAULT_RULES: list[Rule] = [
     Rule(r"\b(ATM\s*WDL|ATM\s*CASH|CASH\s*WDL|CASH\s*WITHDRAWAL|ATW|NFS\s*CASH)\b", CASH, "Cash-in-Hand", "debit", 0.9),
     Rule(r"\b(CASH\s*DEP(OSIT)?|BY\s*CASH|CDM\s*DEP)\b", CASH, "Cash-in-Hand", "credit", 0.9),
     Rule(r"\b(INT\.?\s*PD|INTEREST\s*(CREDIT|PAID)|INT\s*CR|SB\s*INT|CREDIT\s*INTEREST)\b", "Bank Interest Received", "Indirect Incomes", "credit", 0.9),
-    Rule(r"\b(SMS\s*CHARGES|CHGS?|CHARGES|ANNUAL\s*FEE|DEBIT\s*CARD\s*FEE|MIN\s*BAL|AMC|GST\s*ON\s*CHG)\b", "Bank Charges", "Indirect Expenses", "debit", 0.88),
+    Rule(r"\b(SMS\s*CHARGES|CHGS?|CHARGES|ANNUAL\s*FEE|DEBIT\s*CARD\s*FEE|MIN\s*BAL|AMC|GST\s*ON\s*CHG)\b|\b(MAB|SMS|ATM|DC|NEFT|IMPS)\s*CHGS", "Bank Charges", "Indirect Expenses", "debit", 0.88),
     Rule(r"\b(CBIC|GST\s*PAYMENT|GSTN|CPIN)\b", "GST Payable", "Duties & Taxes", "debit", 0.85),
     Rule(r"\b(CBDT|TDS\s*PAYMENT|ITNS\s*281|CHALLAN\s*281)\b", "TDS Payable", "Duties & Taxes", "debit", 0.82),
     Rule(r"\b(ADVANCE\s*TAX|SELF\s*ASSESSMENT\s*TAX|ITNS\s*280|CHALLAN\s*280)\b", "Income Tax", "Duties & Taxes", "debit", 0.8),
@@ -78,6 +78,10 @@ _BANK_CODES = {"SBIN", "HDFC", "ICIC", "UTIB", "KKBK", "YESB", "PUNB", "BARB", "
 def counterparty(narration: str) -> str:
     """Best-effort counterparty name from a bank narration."""
     n = narration.strip()
+    # ICICI prints a title line first: "DATRIK SAI UPI/DATRIK SAI/vpa/...". Read from the rail code.
+    m = re.search(r"\b(UPI|NEFT|RTGS|IMPS)[/\-]", n, re.I)
+    if m and m.start() > 0:
+        n = n[m.start():]
     up = n.upper()
     parts: list[str]
 
@@ -156,6 +160,9 @@ def counterparty_type(narration: str, name: str) -> str:
     Order: a business-looking name, then NPCI's own P2M / P2A marker, then the
     payee's UPI handle, then the payment rail.
     """
+    m = re.search(r"\b(UPI|NEFT|RTGS|IMPS)[/\-]", narration, re.I)
+    if m and m.start() > 0:
+        narration = narration[m.start():]  # title line first (ICICI)
     up = narration.upper()
     tokens = {p.strip() for p in re.split(r"[/\- ]", up)}
     if (name and _BUSINESS.search(name)) or _BRANDS.search(up):

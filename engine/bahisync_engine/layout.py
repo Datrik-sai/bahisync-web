@@ -83,6 +83,29 @@ class ColumnMap:
         edges = [-1e9, *cuts, 1e9]
         self.bounds = list(zip(edges[:-1], edges[1:]))
 
+    def refine(self, words: list[Word]) -> None:
+        """Move each boundary between two text columns into the empty strip the
+        data actually leaves between them. Headers are often centred over
+        left-aligned text (ICICI's "Transaction Remarks" sits well to the right of
+        where the remarks start), so the header's left edge is a poor cut."""
+        text_roles = {"date", "value_date", "narration", "ref", "ignore", "drcr"}
+        cuts = [b[1] for b in self.bounds[:-1]]
+        for k, (a, b) in enumerate(zip(self.columns, self.columns[1:])):
+            if a.role not in text_roles or b.role not in text_roles:
+                continue
+            lo, hi = (a.x0 + a.x1) / 2, (b.x0 + b.x1) / 2
+            spans = sorted((max(w.x0, lo), min(w.x1, hi)) for w in words if w.x1 > lo and w.x0 < hi)
+            best: tuple[float, float] | None = None  # (width, midpoint)
+            cursor = lo
+            for x0, x1 in spans + [(hi, hi)]:
+                if x0 - cursor > 4 and (best is None or x0 - cursor > best[0]):
+                    best = (x0 - cursor, (cursor + x0) / 2)
+                cursor = max(cursor, x1)
+            if best is not None:
+                cuts[k] = best[1]
+        edges = [-1e9, *cuts, 1e9]
+        self.bounds = list(zip(edges[:-1], edges[1:]))
+
     def role_of(self, word: Word) -> str:
         roles = {c.role for c in self.columns}
         for (left, right), col in zip(self.bounds, self.columns):
@@ -138,31 +161,39 @@ def _classify(cell_text: str) -> str | None:
     return (_match_role(outside) if outside else None) or _match_role(t)
 
 
-def find_header(lines: list[list[Word]]) -> tuple[int, ColumnMap] | None:
-    """Locate the header line; returns (line_index, ColumnMap)."""
+def find_header(lines: list[list[Word]]) -> tuple[int, ColumnMap, int] | None:
+    """Locate the header; returns (first line index, ColumnMap, number of header lines).
+
+    Headers can wrap over up to three lines (ICICI: "Transaction / Date",
+    "Withdrawal / Amount / (INR)"); words stacked in the same column are merged.
+    """
     for i, line in enumerate(lines[:80]):
-        joined = " ".join(w.text for w in line).lower()
+        window = [line]
+        for nxt in lines[i + 1 : i + 3]:
+            if nxt[0].top - line[0].top >= 16 or parse_spaced_date([w.text for w in nxt][:3]):
+                break
+            window.append(nxt)
+        joined = " ".join(w.text for ln in window for w in ln).lower()
         if "balance" not in joined or "date" not in joined:
             continue
         if not re.search(r"debit|credit|withdraw|deposit|amount|dr|cr", joined):
             continue
-        candidate = list(line)
-        # Two-line headers: pull in the next line if it is close and has no date.
-        if i + 1 < len(lines):
-            nxt = lines[i + 1]
-            if abs(nxt[0].top - line[0].top) < 14 and not parse_spaced_date([w.text for w in nxt][:3]):
-                candidate = _merge_header_lines(line, nxt)
-        cols: list[Column] = []
-        for text, x0, x1 in _cells(candidate):
-            # Unknown headers (e.g. "Tran Id") become ignored columns so their
-            # values don't spill into a neighbouring column.
-            cols.append(Column(_classify(text) or "ignore", text, x0, x1))
-        roles = [c.role for c in cols]
-        has_amounts = ("debit" in roles and "credit" in roles) or "amount" in roles
-        if "date" in roles and "balance" in roles and has_amounts:
-            heights = sorted(w.bottom - w.top for w in line)
-            font_size = heights[len(heights) // 2] if heights else 8.0
-            return i, ColumnMap(_dedupe(cols), font_size=font_size)
+        # Try the longest stack first, then shorter ones (a data line can sit close below a one-line header).
+        for n in range(len(window), 0, -1):
+            candidate = list(window[0])
+            for extra in window[1:n]:
+                candidate = _merge_header_lines(candidate, extra)
+            cols: list[Column] = []
+            for text, x0, x1 in _cells(candidate):
+                # Unknown headers (e.g. "Tran Id") become ignored columns so their
+                # values don't spill into a neighbouring column.
+                cols.append(Column(_classify(text) or "ignore", text, x0, x1))
+            roles = [c.role for c in cols]
+            has_amounts = ("debit" in roles and "credit" in roles) or "amount" in roles
+            if "date" in roles and "balance" in roles and has_amounts:
+                heights = sorted(w.bottom - w.top for ln in window[:n] for w in ln)
+                font_size = heights[len(heights) // 2] if heights else 8.0
+                return i, ColumnMap(_dedupe(cols), font_size=font_size), n
     return None
 
 
@@ -225,11 +256,14 @@ def extract_rows(pages: list[PageWords]) -> tuple[list[Transaction], Decimal | N
         start = 0
         found = find_header(lines)
         if found:
-            idx, colmap = found
-            start = idx + 1
-            # Skip the second header line if it was merged in.
-            if start < len(lines) and abs(lines[start][0].top - lines[idx][0].top) < 14 and not _line_has_date(lines[start], colmap):
-                start += 1
+            idx, colmap, header_lines = found
+            start = idx + header_lines
+            # Fit text-column boundaries to the data rows of this page (up to just
+            # past the last dated line, so footers and legends don't count).
+            body = lines[start:]
+            dated = [ln[0].top for ln in body if _line_has_date(ln, colmap)]
+            if dated:
+                colmap.refine([w for ln in body if ln[0].top <= dated[-1] + 40 for w in ln])
         if colmap is None:
             continue
 
@@ -266,7 +300,11 @@ def extract_rows(pages: list[PageWords]) -> tuple[list[Transaction], Decimal | N
 
         if mode is None and any(r[2] for r in rows):
             mode = _row_mode(rows)
-        groups = _close_on_amounts(rows, pw.page, drafts, carry) if mode == "amount_closes" else _group_rows(rows, pw.page, drafts)
+        groups = (
+            _close_on_amounts(rows, pw.page, drafts, carry)
+            if mode == "amount_closes"
+            else _group_rows(rows, pw.page, drafts, pw.rules)
+        )
         for d, parts in groups:
             for by_role in parts:
                 for role in ("narration", "ref", "value_date", "debit", "credit", "amount", "drcr", "balance"):
@@ -300,7 +338,7 @@ def extract_rows(pages: list[PageWords]) -> tuple[list[Transaction], Decimal | N
 
 
 def _group_rows(
-    rows: list[tuple[float, dict[str, list[str]], bool]], page: int, drafts: list[_Draft]
+    rows: list[tuple[float, dict[str, list[str]], bool]], page: int, drafts: list[_Draft], rules: list[float] | None = None
 ) -> list[tuple[_Draft, list[dict[str, list[str]]]]]:
     """Stitch a page's lines into transactions using the table's row bands.
 
@@ -320,12 +358,36 @@ def _group_rows(
         return out
     gaps = [b[0] - a[0] for a, b in zip(rows, rows[1:]) if b[0] - a[0] > 2]
     line_gap = min(gaps) if gaps else 0.0
-    bands: list[list[int]] = [[0]]
-    for i in range(1, len(rows)):
-        if line_gap and rows[i][0] - rows[i - 1][0] > line_gap * 1.3:
-            bands.append([i])
-        else:
-            bands[-1].append(i)
+
+    def gap_bands(idx: list[int]) -> list[list[int]]:
+        bands: list[list[int]] = [[idx[0]]]
+        for a, b in zip(idx, idx[1:]):
+            if line_gap and rows[b][0] - rows[a][0] > line_gap * 1.3:
+                bands.append([b])
+            else:
+                bands[-1].append(b)
+        return bands
+
+    # Ruled tables (ICICI and others draw a line under every row): the rules are
+    # the row boundaries, so a bold title printed above the date stays with its
+    # row. Used only when rules really separate the dated rows.
+    anchor_tops = [r[0] for r in rows if r[2]]
+    ruled = sorted(rules or [])
+    separated = sum(1 for a, b in zip(anchor_tops, anchor_tops[1:]) if any(a < y < b for y in ruled))
+    if ruled and len(anchor_tops) > 1 and separated >= (len(anchor_tops) - 1) * 0.8:
+        by_rule: dict[int, list[int]] = {}
+        for i, (top, _, _) in enumerate(rows):
+            by_rule.setdefault(sum(1 for y in ruled if y <= top), []).append(i)
+        bands = []
+        last_anchor_key = max(k for k, idx in by_rule.items() if any(rows[i][2] for i in idx))
+        for k in sorted(by_rule):
+            if k > last_anchor_key:
+                break  # below the rule closing the last row: sign-off, legends, footer
+            idx = by_rule[k]
+            n_anchor = sum(1 for i in idx if rows[i][2])
+            bands.extend([idx] if n_anchor <= 1 else gap_bands(idx))
+    else:
+        bands = gap_bands(list(range(len(rows))))
 
     def new_draft(i: int) -> _Draft:
         d = _Draft(rows[i][1].get("date", []), page)
