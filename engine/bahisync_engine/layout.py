@@ -24,7 +24,7 @@ ROLE_KEYWORDS: list[tuple[str, list[str]]] = [
     ("value_date", ["value date", "value dt", "val dt", "value"]),
     ("date", ["txn date", "transaction date", "tran date", "trans date", "post date", "posting date", "date"]),
     ("narration", ["narration", "description", "particulars", "transaction remarks", "remarks", "details", "transaction details"]),
-    ("ref", ["chq./ref.no", "chq/ref no", "chq/ref.no", "ref no./cheque no", "ref.no", "cheque number", "cheque no", "chq no", "chq.no", "ref no", "reference", "cheque", "chq", "ref"]),
+    ("ref", ["ref/cheque no", "ref / cheque no", "chq./ref.no", "chq/ref no", "chq/ref.no", "ref no./cheque no", "ref.no", "cheque number", "cheque no", "chq no", "chq.no", "ref no", "reference", "cheque", "chq", "ref"]),
     ("debit", ["withdrawal amt", "withdrawal amount", "withdrawals", "withdrawal", "debit amount", "debits", "debit", "dr amount"]),
     ("credit", ["deposit amt", "deposit amount", "deposits", "deposit", "credit amount", "credits", "credit", "cr amount"]),
     ("drcr", ["dr/cr", "cr/dr", "dr / cr", "type"]),
@@ -119,13 +119,20 @@ def _cells(line: list[Word], gap: float = 7.0) -> list[tuple[str, float, float]]
     return [(" ".join(w.text for w in c), c[0].x0, c[-1].x1) for c in cells]
 
 
-def _classify(cell_text: str) -> str | None:
-    t = re.sub(r"\s+", " ", cell_text.lower().replace("(inr)", "").replace("(rs.)", "").replace("(₹)", "")).strip(" .:")
+def _match_role(t: str) -> str | None:
     for role, keys in ROLE_KEYWORDS:
         for k in keys:
             if t == k or t.startswith(k + " ") or t.endswith(" " + k) or (len(k) > 4 and k in t):
                 return role
     return None
+
+
+def _classify(cell_text: str) -> str | None:
+    t = re.sub(r"\s+", " ", cell_text.lower().replace("(inr)", "").replace("(rs.)", "").replace("(₹)", "")).strip(" .:")
+    # Bracketed text is a qualifier, not the column's name: SBI's "Date (Value Date)"
+    # is the transaction date, "Withdrawal (Dr)" is the debit column.
+    outside = re.sub(r"\s+", " ", re.sub(r"\([^)]*\)", " ", t)).strip(" .:")
+    return (_match_role(outside) if outside else None) or _match_role(t)
 
 
 def find_header(lines: list[list[Word]]) -> tuple[int, ColumnMap] | None:
@@ -221,6 +228,7 @@ def extract_rows(pages: list[PageWords]) -> tuple[list[Transaction], Decimal | N
         if colmap is None:
             continue
 
+        rows: list[tuple[float, dict[str, list[str]], bool]] = []  # (top, words by role, starts a row)
         for line in lines[start:]:
             text = " ".join(w.text for w in line)
             has_date = _line_has_date(line, colmap)
@@ -228,14 +236,14 @@ def extract_rows(pages: list[PageWords]) -> tuple[list[Transaction], Decimal | N
                 # Only the first one is the statement's opening balance; a
                 # "Brought Forward" on page 2+ is the previous page's closing.
                 bal = _last_amount(line)
-                if bal is not None and opening is None and not drafts:
+                if bal is not None and opening is None and not drafts and not any(r[2] for r in rows):
                     opening = bal
                 continue
             if not has_date and _is_repeated_header(text):
                 continue
             if not has_date and NOISE_PATTERNS.search(text) and not re.search(r"(?i)closing balance", text):
                 continue
-            if STOP_PATTERNS.search(text) and not _line_has_date(line, colmap):
+            if STOP_PATTERNS.search(text) and not has_date:
                 if re.search(r"(?i)closing balance|end of statement|statement summary|grand total", text):
                     stopped = True
                     break
@@ -244,20 +252,13 @@ def extract_rows(pages: list[PageWords]) -> tuple[list[Transaction], Decimal | N
             by_role: dict[str, list[str]] = {}
             for w in line:
                 by_role.setdefault(colmap.role_of(w), []).append(w.text)
-
             date_tokens = by_role.get("date", [])
-            parsed = parse_spaced_date(date_tokens) if date_tokens else None
-            if parsed:
-                d = _Draft(date_tokens, pw.page)
-                # Tokens after the date in the date column (e.g. a time) are ignored.
-                drafts.append(d)
-            elif drafts:
-                d = drafts[-1]
-            else:
-                continue  # text between header and first row (e.g. account details)
+            rows.append((line[0].top, by_role, bool(date_tokens and parse_spaced_date(date_tokens))))
 
-            for role in ("narration", "ref", "value_date", "debit", "credit", "amount", "drcr", "balance"):
-                getattr(d, role).extend(by_role.get(role, []))
+        for d, parts in _group_rows(rows, pw.page, drafts):
+            for by_role in parts:
+                for role in ("narration", "ref", "value_date", "debit", "credit", "amount", "drcr", "balance"):
+                    getattr(d, role).extend(by_role.get(role, []))
         if stopped:
             break
 
@@ -282,6 +283,57 @@ def extract_rows(pages: list[PageWords]) -> tuple[list[Transaction], Decimal | N
     for i, t in enumerate(txns, start=1):
         t.row_no = i
     return txns, opening, warnings
+
+
+def _group_rows(
+    rows: list[tuple[float, dict[str, list[str]], bool]], page: int, drafts: list[_Draft]
+) -> list[tuple[_Draft, list[dict[str, list[str]]]]]:
+    """Stitch a page's lines into transactions using the table's row bands.
+
+    Lines inside one table row are a line-height apart; rows are separated by a
+    larger gap. Each band of lines between two such gaps is one transaction,
+    wherever its date sits: top-aligned (most banks) or vertically centred on a
+    wrapped narration (SBI), so "TRANSFER TO ..." on the next line and text
+    printed above the date both land on the right row.
+
+    A band with no date continues the transaction before it (a row broken
+    across pages). A band with several dates (a table with no row spacing)
+    falls back to "each line belongs to the dated line above it".
+    Parts are returned top to bottom so narration keeps its reading order.
+    """
+    out: list[tuple[_Draft, list[dict[str, list[str]]]]] = []
+    if not rows:
+        return out
+    gaps = [b[0] - a[0] for a, b in zip(rows, rows[1:]) if b[0] - a[0] > 2]
+    line_gap = min(gaps) if gaps else 0.0
+    bands: list[list[int]] = [[0]]
+    for i in range(1, len(rows)):
+        if line_gap and rows[i][0] - rows[i - 1][0] > line_gap * 1.3:
+            bands.append([i])
+        else:
+            bands[-1].append(i)
+
+    def new_draft(i: int) -> _Draft:
+        d = _Draft(rows[i][1].get("date", []), page)
+        drafts.append(d)
+        return d
+
+    for band in bands:
+        anchors = [i for i in band if rows[i][2]]
+        if len(anchors) == 1:
+            out.append((new_draft(anchors[0]), [rows[i][1] for i in band]))
+            continue
+        current = drafts[-1] if drafts else None
+        pending: list[dict[str, list[str]]] = []
+        for i in band:
+            if rows[i][2]:
+                if current is not None and pending:
+                    out.append((current, pending))
+                current, pending = new_draft(i), []
+            pending.append(rows[i][1])
+        if current is not None and pending:
+            out.append((current, pending))
+    return out
 
 
 def _is_repeated_header(text: str) -> bool:

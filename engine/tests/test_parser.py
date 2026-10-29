@@ -11,7 +11,7 @@ import pytest
 from bahisync_engine.parser import parse_statement
 from bahisync_engine.pdf_io import PasswordRequired
 
-TEXT_FIXTURES = ["sbi", "hdfc", "icici", "axis", "kotak", "gramin", "hdfc_password"]
+TEXT_FIXTURES = ["sbi", "sbi_net", "sbi_net2", "hdfc", "icici", "axis", "kotak", "gramin", "hdfc_password"]
 
 
 def squash(s: str) -> str:
@@ -73,3 +73,23 @@ def test_tampered_amount_is_flagged(fixtures):
     checked, *_ = balance.verify(txns, r.opening_balance)
     bad = [t for t in checked if t.balance_ok is False]
     assert target in bad
+
+
+def test_bracketed_header_qualifiers():
+    """SBI's 'Date (Value Date)' is the transaction date column, not the value date."""
+    from bahisync_engine.layout import _classify
+
+    assert _classify("Date (Value Date)") == "date"
+    assert _classify("Value Date") == "value_date"
+    assert _classify("Ref/Cheque No.") == "ref"
+    assert _classify("Withdrawal (Dr)") == "debit"
+    assert _classify("Deposit (Cr)") == "credit"
+    assert _classify("Balance (INR)") == "balance"
+
+
+def test_sbi_centred_rows_keep_wrapped_narration(fixtures):
+    """Date and amounts centred on a 3-line narration: every line stays on its own row."""
+    r = parse_statement(fixtures["sbi_net"].pdf)
+    upi = [t for t in r.transactions if t.narration.startswith("UPI")]
+    assert upi and all(t.narration.replace(" ", "").endswith("TRANSFERTO4897696162090") for t in upi)
+    assert not any("(" in t.narration for t in r.transactions)  # bracketed value dates never leak into narration

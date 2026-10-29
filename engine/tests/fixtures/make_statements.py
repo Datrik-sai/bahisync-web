@@ -110,6 +110,8 @@ class Layout:
     amount_suffix: bool = False  # single Amount column printed as "1,250.00 Dr"
     page_noise: bool = False  # Page Total / Carried Forward / Brought Forward rows, repeated header
     print_opening: bool = True
+    valign: str = "top"  # "middle": date and amounts centred on the wrapped narration (SBI)
+    value_date_below: bool = False  # "(01/04/2025)" printed under the date, in the same column
 
 
 LAYOUTS = {
@@ -141,6 +143,24 @@ LAYOUTS = {
         [("Tran Date", 30, "l"), ("Particulars", 95, "l"), ("Amount", 430, "r"), ("Dr/Cr", 460, "l"), ("Balance", 570, "r")],
         "%d-%m-%Y", 44, mode="single", newest_first=True, balance_suffix=True, page_size=(600, 842),
     ),
+    # SBI net-banking (2025): "Date (Value Date)" column with the value date in
+    # brackets under the date, rows vertically centred on a wrapped narration.
+    "sbi_net": Layout(
+        "sbi_net",
+        ["State Bank of India", "Account Name : MR SAI KUMAR", "Account Number : XXXXXXX4821", "IFSC Code : SBIN0020063",
+         "Statement From : 01-03-2025 to 30-06-2025"],
+        [("Date (Value Date)", 30, "l"), ("Narration", 110, "l"), ("Ref/Cheque No.", 300, "l"),
+         ("Debit", 450, "r"), ("Credit", 520, "r"), ("Balance", 600, "r")],
+        "%d/%m/%Y", 30, page_size=(630, 842), valign="middle", value_date_below=True, rows_per_page=18,
+    ),
+    # Same columns with the header wrapped onto two lines and top-aligned rows.
+    "sbi_net2": Layout(
+        "sbi_net2",
+        ["State Bank of India", "Account Number : XXXXXXX4821", "IFSC Code : SBIN0020063"],
+        [("Date (Value Date)", 30, "l"), ("Narration", 110, "l"), ("Ref/Cheque No.", 300, "l"),
+         ("Debit", 450, "r"), ("Credit", 520, "r"), ("Balance", 600, "r")],
+        "%d %b %Y", 30, page_size=(630, 842), value_date_below=True, two_line_header=True, rows_per_page=18,
+    ),
     # Regional / Gramin style: one Amount column with Dr/Cr suffix, page totals,
     # carried/brought forward rows, a repeated header mid-page and no opening line.
     "gramin": Layout(
@@ -163,7 +183,7 @@ LAYOUTS = {
 def _header_cells(c: canvas.Canvas, layout: Layout, y: float) -> float:
     c.setFont("Helvetica-Bold", 7.5)
     for title, x, align in layout.columns:
-        if layout.two_line_header and " " in title and len(title) > 12:
+        if layout.two_line_header and " " in title and len(title) > 11:
             first, second = title.split(" ", 1)
             draw = c.drawRightString if align == "r" else c.drawString
             draw(x, y, first)
@@ -206,19 +226,24 @@ def render(layout: Layout, truths: list[Truth], opening: Decimal) -> bytes:
                 y = _header_cells(c, layout, y)  # header printed again mid-page
                 c.setFont("Helvetica", 7.5)
             lines = textwrap.wrap(t.narration, layout.wrap) or [""]
+            row_y = y  # where the narration starts
+            if layout.valign == "middle":
+                y = row_y - 9 * ((len(lines) - 1) // 2)  # date and amounts sit on the middle line
             for col_title, x, align in layout.columns:
                 key = col_title.lower()
                 draw = c.drawRightString if align == "r" else c.drawString
-                if key in ("txn date", "date", "transaction date", "tran date"):
+                if key in ("txn date", "date", "transaction date", "tran date") or key.startswith("date ("):
                     draw(x, y, t.txn_date.strftime(layout.date_fmt))
+                    if layout.value_date_below:
+                        draw(x, y - 9, "(" + t.txn_date.strftime(layout.date_fmt) + ")")
                 elif key in ("value date", "value dt"):
                     draw(x, y, t.txn_date.strftime(layout.date_fmt))
                 elif key == "s no.":
                     draw(x, y, str(s_no))
                 elif key in ("description", "narration", "particulars", "transaction remarks"):
                     for k, line in enumerate(lines):
-                        c.drawString(x, y - k * 9, line)
-                elif key in ("ref no./cheque no.", "chq./ref.no.", "cheque number", "chq/ref no"):
+                        c.drawString(x, row_y - k * 9, line)
+                elif key in ("ref no./cheque no.", "chq./ref.no.", "cheque number", "chq/ref no", "ref/cheque no."):
                     draw(x, y, t.ref)
                 elif layout.mode == "split" and key.startswith(("debit", "withdrawal")):
                     if t.debit:
@@ -234,7 +259,8 @@ def render(layout: Layout, truths: list[Truth], opening: Decimal) -> bytes:
                 elif "balance" in key:
                     text = inr(t.balance) + (" Cr" if layout.balance_suffix else "")
                     draw(x, y, text)
-            y -= 9 * len(lines) + 5
+            height = max(len(lines), 2 if layout.value_date_below else 1, ((len(lines) - 1) // 2) + 2 if layout.value_date_below else 1)
+            y = row_y - 9 * height - 5
         if layout.page_noise:
             dr = sum((t.debit for t in page_rows), Decimal("0"))
             cr = sum((t.credit for t in page_rows), Decimal("0"))
@@ -301,6 +327,15 @@ def build_all() -> dict[str, Fixture]:
         truths = make_truths(seed, n, opening)
         pdf = render(LAYOUTS[name], truths, opening)
         out[name] = Fixture(name, pdf, truths, opening, expected_bank=bank)
+
+    # SBI net-banking: UPI narrations wrap onto a second "TRANSFER TO ..." line.
+    for name, seed in (("sbi_net", 17), ("sbi_net2", 18)):
+        truths = make_truths(seed, 36, Decimal("84210.40"))
+        for t in truths:
+            if t.narration.startswith("UPI"):
+                t.narration += " TRANSFER TO 4897696 162090"
+        out[name] = Fixture(name, render(LAYOUTS[name], truths, Decimal("84210.40")), truths, Decimal("84210.40"),
+                            expected_bank="State Bank of India")
 
     hd = out["hdfc"]
     out["hdfc_password"] = Fixture("hdfc_password", encrypt(hd.pdf, "SAI1990"), hd.truths, hd.opening, "SAI1990", hd.expected_bank)
