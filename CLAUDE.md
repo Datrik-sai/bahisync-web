@@ -5,8 +5,10 @@ verified against the running balance; that check is the product's promise.
 
 ## Layout
 - `engine/bahisync_engine/` — Python core. `parser.py` is the entry point.
-  - `pdf_io.py` open/decrypt PDFs, read words (text layer or Tesseract OCR)
-  - `layout.py` header-driven table parser (no per-bank code; add header synonyms to `ROLE_KEYWORDS`)
+  - `pdf_io.py` open/decrypt PDFs, read words (text layer, else RapidOCR / Tesseract OCR)
+  - `layout.py` header-driven table parser (no per-bank code; add header synonyms to `ROLE_KEYWORDS`).
+    Rows are stitched by row bands (top-aligned or centred dates), or, when amounts sit on undated
+    lines (HSBC), each amount line closes a transaction dated by the latest date above it.
   - `balance.py` running-balance verification, newest-first detection
   - `ledgers.py` ledger suggestions: client rules > default rules > AI > party guess > Suspense
   - `export_tally.py` ledger masters + vouchers XML; `export_excel.py`
@@ -54,5 +56,6 @@ verified against the running balance; that check is the product's promise.
 - `bahisync-web` env: `BAHISYNC_API_URL` = the API's production URL (read at build time by the rewrite);
   `BLOB_READ_WRITE_TOKEN` comes from the connected Blob store.
 - Vercel Functions cap request bodies at 4.5 MB, so uploads are limited to 4 MB.
-- Vercel has no Tesseract, so scanned PDFs return a clear `scanned_unsupported` error there.
-  The Docker image includes OCR.
+- Scanned / image-only PDFs (e.g. HSBC e-statements) are read with RapidOCR (pip, models bundled, no
+  network calls), up to `MAX_OCR_PAGES` pages; Tesseract is the fallback where installed (Docker).
+  The OCR stack keeps the API bundle near 400 MB of Vercel's 500 MB limit: don't add heavy dependencies.

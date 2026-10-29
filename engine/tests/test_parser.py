@@ -96,3 +96,26 @@ def test_sbi_centred_rows_keep_wrapped_narration(fixtures):
     # Browser print header ("19/02/2025, 14:23 ...") and footer URL / page number are not rows or narration.
     assert not any("http" in t.narration or "14:23" in t.narration for t in r.transactions)
     assert r.balance_verified
+
+
+def test_hsbc_one_date_per_day_amounts_on_last_line(fixtures):
+    """HSBC prints the date once per day and the amounts on each transaction's last line."""
+    fx = fixtures["hsbc"]
+    r = parse_statement(fx.pdf)
+    assert r.balance_verified and r.rows_total == len(fx.truths)
+    for got, want in zip(r.transactions, fx.truths):
+        assert (got.txn_date, got.debit, got.credit, got.balance) == (want.txn_date, want.debit, want.credit, want.balance)
+        assert squash(got.narration).startswith(squash(want.narration))  # + HSBC's own reference line
+    assert len({t.txn_date for t in fx.truths}) < len(fx.truths)  # some days really have several rows
+    assert r.opening_balance == fx.opening  # dated "BALANCE BROUGHT FORWARD" row, not a transaction
+
+
+def test_image_only_statement_is_read_with_ocr(fixtures):
+    """HSBC e-statement exports have no text layer at all: every amount must come back exact."""
+    fx = fixtures["hsbc_scanned"]
+    r = parse_statement(fx.pdf)
+    assert r.used_ocr and r.bank == "HSBC"
+    assert r.rows_total == len(fx.truths)
+    for got, want in zip(r.transactions, fx.truths):
+        assert (got.txn_date, got.debit, got.credit, got.balance) == (want.txn_date, want.debit, want.credit, want.balance)
+    assert r.balance_verified

@@ -142,7 +142,7 @@ export default function UploadPage() {
               <div>
                 <p className="text-lg font-semibold">Drop the statement PDF here</p>
                 <p className="mt-1 text-sm text-ink-soft">
-                  The digital PDF from net banking, up to {MAX_MB} MB. Password-protected files work too; scanned PDFs aren't supported yet.
+                  The digital PDF from net banking, up to {MAX_MB} MB. Password-protected and scanned files work too.
                 </p>
                 <label htmlFor="statement-file" className="mt-4 inline-block cursor-pointer rounded-md border border-ink/30 bg-sheet px-4 py-2 font-semibold hover:border-ink">
                   Choose file

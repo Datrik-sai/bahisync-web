@@ -289,6 +289,53 @@ def render(layout: Layout, truths: list[Truth], opening: Decimal) -> bytes:
     return buf.getvalue()
 
 
+def render_hsbc(truths: list[Truth], opening: Decimal) -> bytes:
+    """HSBC style: the date is printed once per day, each transaction's narration
+    runs over several lines and its amounts sit on the last line. Columns are
+    Date | Transaction Details | Deposits | Withdrawals | Balance (DR=Debit)."""
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=(600, 842))
+    y = 800
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(30, y, "HSBC")
+    c.setFont("Helvetica", 8)
+    c.drawString(30, y - 16, "The Hongkong and Shanghai Banking Corporation Limited")
+    c.drawString(30, y - 28, "SAVINGS ACCOUNT-RES  083-257485-006   IFSC CODE: HSBC0500002")
+    y -= 60
+    c.setFont("Helvetica-Bold", 8)
+    for title, x, align in [("Date", 30, "l"), ("Transaction Details", 100, "l"), ("Deposits", 380, "r"),
+                            ("Withdrawals", 470, "r"), ("Balance", 560, "r")]:
+        (c.drawRightString if align == "r" else c.drawString)(x, y, title)
+    c.drawRightString(560, y - 10, "(DR=Debit)")
+    y -= 26
+    c.setFont("Helvetica", 8)
+    c.drawString(30, y, (truths[0].txn_date - timedelta(days=1)).strftime("%d%b%Y"))
+    c.drawString(100, y, "BALANCE BROUGHT FORWARD")
+    c.drawRightString(560, y, inr(opening))
+    y -= 13
+    last_day = None
+    for t in truths:
+        lines = textwrap.wrap(t.narration, 34) or [""]
+        lines.append(f"{t.txn_date:%Y/%m/%d} {t.ref}")  # reference line carries the amounts
+        if t.txn_date != last_day:
+            c.drawString(30, y, t.txn_date.strftime("%d%b%Y"))
+            last_day = t.txn_date
+        for k, line in enumerate(lines):
+            c.drawString(100, y, line)
+            if k == len(lines) - 1:
+                if t.credit:
+                    c.drawRightString(380, y, inr(t.credit))
+                else:
+                    c.drawRightString(470, y, inr(t.debit))
+                c.drawRightString(560, y, inr(t.balance))
+            y -= 13
+    c.drawString(100, y, "CLOSING BALANCE")
+    c.drawRightString(560, y, inr(truths[-1].balance))
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
 def encrypt(pdf_bytes: bytes, password: str) -> bytes:
     out = io.BytesIO()
     with pikepdf.open(io.BytesIO(pdf_bytes)) as pdf:
@@ -346,6 +393,13 @@ def build_all() -> dict[str, Fixture]:
                 t.narration += " TRANSFER TO 4897696 162090"
         out[name] = Fixture(name, render(LAYOUTS[name], truths, Decimal("84210.40")), truths, Decimal("84210.40"),
                             expected_bank="State Bank of India")
+
+    # HSBC: one date per day, amounts on each transaction's last line. A text
+    # version tests the layout; an image-only version (like HSBC's e-statement
+    # exports, which have no text layer) tests OCR end to end.
+    hs = make_truths(19, 9, Decimal("289.41"))
+    out["hsbc"] = Fixture("hsbc", render_hsbc(hs, Decimal("289.41")), hs, Decimal("289.41"), expected_bank="HSBC")
+    out["hsbc_scanned"] = Fixture("hsbc_scanned", rasterise(out["hsbc"].pdf), hs, Decimal("289.41"), expected_bank="HSBC")
 
     hd = out["hdfc"]
     out["hdfc_password"] = Fixture("hdfc_password", encrypt(hd.pdf, "SAI1990"), hd.truths, hd.opening, "SAI1990", hd.expected_bank)

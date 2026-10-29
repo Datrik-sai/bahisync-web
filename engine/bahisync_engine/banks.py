@@ -41,6 +41,10 @@ IFSC_PREFIXES = {
     "APGV": "Andhra Pragathi Grameena Bank",
     "TGMB": "Telangana Grameena Bank",
     "TSAB": "Telangana State Co-op Apex Bank",
+    "HSBC": "HSBC",
+    "SCBL": "Standard Chartered Bank",
+    "CITI": "Citibank",
+    "DBSS": "DBS Bank",
 }
 
 NAME_PATTERNS = [(re.compile(re.escape(name), re.I), name) for name in IFSC_PREFIXES.values()] + [
@@ -49,6 +53,8 @@ NAME_PATTERNS = [(re.compile(re.escape(name), re.I), name) for name in IFSC_PREF
     (re.compile(r"\bicici\b", re.I), "ICICI Bank"),
     (re.compile(r"\baxis bank\b", re.I), "Axis Bank"),
     (re.compile(r"\bkotak\b", re.I), "Kotak Mahindra Bank"),
+    (re.compile(r"\bhsbc\b|hongkong and shanghai banking", re.I), "HSBC"),
+    (re.compile(r"\bindusind\b", re.I), "IndusInd Bank"),
 ]
 
 _IFSC_RE = re.compile(r"\b([A-Z]{4})0[A-Z0-9]{6}\b")

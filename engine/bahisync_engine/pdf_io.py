@@ -1,8 +1,14 @@
 """Opening statement PDFs (including password-protected ones) and reading words.
 
-Text PDFs are read from their text layer. Scanned PDFs (no text layer) fall back
-to OCR with Tesseract, producing the same Word objects so the layout parser
+Text PDFs are read from their text layer. Scanned or image-only PDFs (no text
+layer) fall back to OCR, producing the same Word objects so the layout parser
 does not care where words came from.
+
+OCR engines, in order:
+  1. RapidOCR (PP-OCR models on onnxruntime, pip-installable; used on Vercel).
+     The models ship inside the package, so nothing is downloaded and no page
+     image leaves the process.
+  2. Tesseract + Poppler, when those binaries are installed (Docker image).
 """
 
 from __future__ import annotations
@@ -25,7 +31,7 @@ class UnreadablePDF(Exception):
 
 
 class ScannedUnsupported(Exception):
-    """A scanned PDF arrived but OCR tools (tesseract/poppler) aren't installed."""
+    """A scanned PDF arrived but no OCR engine is installed."""
 
 
 @dataclass
@@ -81,19 +87,119 @@ def read_words(pdf_bytes: bytes, ocr: bool = True) -> tuple[list[PageWords], boo
     return _ocr_pages(pdf_bytes)
 
 
-def ocr_available() -> bool:
+OCR_DPI = 200
+MAX_OCR_PAGES = 12  # keeps a request inside the function time limit (~5 s a page)
+
+
+def _rapidocr_installed() -> bool:
+    try:
+        import rapidocr  # noqa: F401
+        import pypdfium2  # noqa: F401
+    except Exception:
+        return False
+    return True
+
+
+def _tesseract_installed() -> bool:
     import shutil
 
     return bool(shutil.which("tesseract") and shutil.which("pdftoppm"))
 
 
+def ocr_available() -> bool:
+    return _rapidocr_installed() or _tesseract_installed()
+
+
+class TooManyScannedPages(UnreadablePDF):
+    pass
+
+
 def _ocr_pages(pdf_bytes: bytes) -> tuple[list[PageWords], bool, str]:
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as doc:
+        n = len(doc.pages)
+    if n > MAX_OCR_PAGES:
+        raise TooManyScannedPages(
+            f"This scanned statement has {n} pages. Scanned PDFs are read with OCR, up to {MAX_OCR_PAGES} pages "
+            "at a time: split it by month, or download the digital PDF from net banking."
+        )
+    if _rapidocr_installed():
+        return _ocr_rapid(pdf_bytes)
+    return _ocr_tesseract(pdf_bytes)
+
+
+_RAPID = None
+
+
+def _rapid_engine():
+    """One engine per warm process; loading the models takes about a second."""
+    global _RAPID
+    if _RAPID is None:
+        try:
+            import onnxruntime
+
+            onnxruntime.disable_telemetry_events()
+        except Exception:
+            pass
+        from rapidocr import RapidOCR
+
+        _RAPID = RapidOCR(params={"Global.log_level": "error"})
+    return _RAPID
+
+
+def _phrase_words(text: str, x0: float, x1: float, top: float, bottom: float, page: int) -> list[Word]:
+    """RapidOCR returns phrases; split them into words with proportional x spans."""
+    parts = text.split()
+    if len(parts) <= 1:
+        return [Word(text.strip(), x0, x1, top, bottom, page)] if text.strip() else []
+    unit = (x1 - x0) / max(len(text), 1)
+    out: list[Word] = []
+    pos = 0
+    for part in parts:
+        start = text.index(part, pos)
+        end = start + len(part)
+        out.append(Word(part, x0 + start * unit, x0 + end * unit, top, bottom, page))
+        pos = end
+    return out
+
+
+def _ocr_rapid(pdf_bytes: bytes) -> tuple[list[PageWords], bool, str]:
+    import numpy as np
+    import pypdfium2 as pdfium
+
+    engine = _rapid_engine()
+    doc = pdfium.PdfDocument(pdf_bytes)
+    scale = 72 / OCR_DPI
+    pages: list[PageWords] = []
+    first_text = ""
+    try:
+        for i in range(min(len(doc), MAX_OCR_PAGES)):
+            page = doc[i]
+            image = np.array(page.render(scale=OCR_DPI / 72).to_pil().convert("RGB"))
+            result = engine(image)
+            words: list[Word] = []
+            texts: list[str] = []
+            for box, text, score in zip(result.boxes if result.boxes is not None else [], result.txts or [], result.scores or []):
+                if not text or float(score) < 0.5:
+                    continue
+                xs = [pt[0] for pt in box]
+                ys = [pt[1] for pt in box]
+                words.extend(_phrase_words(text, min(xs) * scale, max(xs) * scale, min(ys) * scale, max(ys) * scale, i + 1))
+                texts.append(text)
+            pages.append(PageWords(i + 1, float(page.get_width()), words))
+            if i == 0:
+                first_text = "\n".join(texts)
+    finally:
+        doc.close()
+    return pages, True, first_text
+
+
+def _ocr_tesseract(pdf_bytes: bytes) -> tuple[list[PageWords], bool, str]:
     """OCR every page. Requires the tesseract and poppler binaries."""
     import pytesseract
     from pdf2image import convert_from_bytes
 
     dpi = 300
-    images = convert_from_bytes(pdf_bytes, dpi=dpi)
+    images = convert_from_bytes(pdf_bytes, dpi=dpi, last_page=MAX_OCR_PAGES)
     scale = 72 / dpi  # convert pixels back to PDF points so thresholds stay the same
     pages: list[PageWords] = []
     first_text = ""

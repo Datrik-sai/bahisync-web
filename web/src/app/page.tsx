@@ -7,7 +7,7 @@ import { SiteHeader, Wordmark } from "@/components/Wordmark";
 const STEPS = [
   {
     title: "Upload the PDF",
-    body: "Any Indian bank's digital statement PDF, including password-protected ones. Scanned (photographed or printed-and-scanned) PDFs aren't supported online yet.",
+    body: "Any Indian bank's statement PDF, including password-protected ones. Scanned and image-only PDFs are read with OCR, so check their flagged rows.",
   },
   { title: "Every row is checked", body: "Each row is added to the previous balance. If it doesn't land on the printed balance, it's flagged." },
   {

@@ -11,8 +11,8 @@ Bank statement PDF → TallyPrime vouchers, with every row checked against the r
   (and ~60 synonyms) instead of using per-bank templates. Tested on synthetic statements modelled on
   SBI, HDFC, ICICI, Axis and Kotak layouts.
 - **Password-protected PDFs:** the password is asked for, used once and never stored.
-- **Scanned PDFs:** OCR with Tesseract when it is installed (Docker image, local). Not available on Vercel,
-  where scanned files get a clear message instead.
+- **Scanned and image-only PDFs:** OCR with RapidOCR (works on Vercel, up to 12 pages a file), Tesseract as
+  a fallback. Tested on a real HSBC e-statement, which has no text layer.
 - **Balance check:** each row must equal previous balance + credit − debit. Newest-first statements
   are detected and reordered. Single "Amount + Dr/Cr" columns and "Cr/Dr" balance suffixes are handled.
 - **Ledger suggestions:** remembered per client from your corrections, then built-in rules (ATM/cash,
@@ -42,7 +42,7 @@ Bank statement PDF → TallyPrime vouchers, with every row checked against the r
 # Engine + API
 cd engine
 pip install -r requirements-dev.txt     # also needs tesseract-ocr and poppler-utils for scans
-python -m pytest -q                     # 56 tests
+python -m pytest -q                     # 62 tests
 uvicorn service.app:app --reload --port 8000
 
 # Web (new terminal)

@@ -217,6 +217,8 @@ def extract_rows(pages: list[PageWords]) -> tuple[list[Transaction], Decimal | N
     drafts: list[_Draft] = []
     opening: Decimal | None = None
     stopped = False
+    mode: str | None = None  # "bands" or "amount_closes", decided on the first page with rows
+    carry: list[dict[str, list[str]]] = []  # amount_closes: lines waiting for their amount line
 
     for pw in pages:
         lines = group_lines(pw.words)
@@ -237,9 +239,11 @@ def extract_rows(pages: list[PageWords]) -> tuple[list[Transaction], Decimal | N
             if PRINT_NOISE.search(text):
                 continue
             has_date = _line_has_date(line, colmap)
-            if OPENING_PATTERNS.search(text) and not has_date:
+            if OPENING_PATTERNS.search(text) and (not has_date or not _has_txn_amount(line, colmap)):
                 # Only the first one is the statement's opening balance; a
                 # "Brought Forward" on page 2+ is the previous page's closing.
+                # Dated B/F rows with only a balance ("25Aug2026 BALANCE BROUGHT
+                # FORWARD 289.41") are handled here too.
                 bal = _last_amount(line)
                 if bal is not None and opening is None and not drafts and not any(r[2] for r in rows):
                     opening = bal
@@ -260,7 +264,10 @@ def extract_rows(pages: list[PageWords]) -> tuple[list[Transaction], Decimal | N
             date_tokens = by_role.get("date", [])
             rows.append((line[0].top, by_role, bool(date_tokens and parse_spaced_date(date_tokens))))
 
-        for d, parts in _group_rows(rows, pw.page, drafts):
+        if mode is None and any(r[2] for r in rows):
+            mode = _row_mode(rows)
+        groups = _close_on_amounts(rows, pw.page, drafts, carry) if mode == "amount_closes" else _group_rows(rows, pw.page, drafts)
+        for d, parts in groups:
             for by_role in parts:
                 for role in ("narration", "ref", "value_date", "debit", "credit", "amount", "drcr", "balance"):
                     getattr(d, role).extend(by_role.get(role, []))
@@ -340,6 +347,52 @@ def _group_rows(
             pending.append(rows[i][1])
         if current is not None and pending:
             out.append((current, pending))
+    return out
+
+
+_TXN_AMOUNT_ROLES = ("debit", "credit", "amount")
+
+
+def _row_has_amount(by_role: dict[str, list[str]]) -> bool:
+    return any(parse_amount(tok) for role in _TXN_AMOUNT_ROLES for tok in by_role.get(role, []))
+
+
+def _has_txn_amount(line: list[Word], colmap: ColumnMap) -> bool:
+    return any(colmap.role_of(w) in _TXN_AMOUNT_ROLES and parse_amount(w.text) for w in line)
+
+
+def _row_mode(rows: list[tuple[float, dict[str, list[str]], bool]]) -> str:
+    """'amount_closes' when amounts sit on undated lines more often than on dated ones.
+
+    HSBC prints the date once per day and each transaction's amounts on its last
+    line, so several transactions can share one date and the dated line has no
+    amount. Everywhere else the dated line carries the amounts.
+    """
+    dated = sum(1 for _, by_role, is_anchor in rows if is_anchor and _row_has_amount(by_role))
+    undated = sum(1 for _, by_role, is_anchor in rows if not is_anchor and _row_has_amount(by_role))
+    return "amount_closes" if undated > dated else "bands"
+
+
+def _close_on_amounts(
+    rows: list[tuple[float, dict[str, list[str]], bool]],
+    page: int,
+    drafts: list[_Draft],
+    carry: list[dict[str, list[str]]],
+) -> list[tuple[_Draft, list[dict[str, list[str]]]]]:
+    """Each line with a debit / credit amount ends a transaction; the lines since
+    the previous one are its narration, and its date is the latest date above it.
+    Lines after the page's last amount line wait in `carry` for the next page."""
+    out: list[tuple[_Draft, list[dict[str, list[str]]]]] = []
+    date_tokens = drafts[-1].date_tokens if drafts else []
+    for _, by_role, is_anchor in rows:
+        if is_anchor:
+            date_tokens = by_role.get("date", [])
+        carry.append(by_role)
+        if _row_has_amount(by_role) and date_tokens:
+            d = _Draft(list(date_tokens), page)
+            drafts.append(d)
+            out.append((d, [{k: v for k, v in r.items() if k != "date"} for r in carry]))
+            carry.clear()
     return out
 
 
