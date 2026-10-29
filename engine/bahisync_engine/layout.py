@@ -42,6 +42,9 @@ NOISE_PATTERNS = re.compile(
     r"(?i)(carried\s*forward|balance\s*c/?f|\bc/f\b|page\s*total|transaction\s*total|"
     r"total\s*(debits?|credits?|withdrawals?|deposits?)|closing balance)"
 )
+# Browser print headers and footers on statements printed from net banking:
+# "19/02/2025, 14:23  State Bank of India", "https://retail.onlinesbi.sbi/...  2/11".
+PRINT_NOISE = re.compile(r"(?i)(https?://|www\.\S+\.\S+|^\d{1,2}/\d{1,2}/\d{2,4},\s*\d{1,2}:\d{2}\b|^\s*\d{1,3}\s*/\s*\d{1,3}\s*$)")
 
 
 @dataclass
@@ -231,6 +234,8 @@ def extract_rows(pages: list[PageWords]) -> tuple[list[Transaction], Decimal | N
         rows: list[tuple[float, dict[str, list[str]], bool]] = []  # (top, words by role, starts a row)
         for line in lines[start:]:
             text = " ".join(w.text for w in line)
+            if PRINT_NOISE.search(text):
+                continue
             has_date = _line_has_date(line, colmap)
             if OPENING_PATTERNS.search(text) and not has_date:
                 # Only the first one is the statement's opening balance; a
@@ -271,6 +276,8 @@ def extract_rows(pages: list[PageWords]) -> tuple[list[Transaction], Decimal | N
         t = _finalise(n, d, colmap, warnings)
         if t is None:
             continue
+        if not t.debit and not t.credit and t.balance is None and not OPENING_PATTERNS.search(t.narration):
+            continue  # a date with nothing else on the row is never a transaction
         if not t.debit and not t.credit:
             # Dated summary rows: "01/04/2026 Opening Balance", "B/F", "C/F", "Page Total".
             if OPENING_PATTERNS.search(t.narration):

@@ -93,3 +93,6 @@ def test_sbi_centred_rows_keep_wrapped_narration(fixtures):
     upi = [t for t in r.transactions if t.narration.startswith("UPI")]
     assert upi and all(t.narration.replace(" ", "").endswith("TRANSFERTO4897696162090") for t in upi)
     assert not any("(" in t.narration for t in r.transactions)  # bracketed value dates never leak into narration
+    # Browser print header ("19/02/2025, 14:23 ...") and footer URL / page number are not rows or narration.
+    assert not any("http" in t.narration or "14:23" in t.narration for t in r.transactions)
+    assert r.balance_verified

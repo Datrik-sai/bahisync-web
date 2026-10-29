@@ -112,6 +112,8 @@ class Layout:
     print_opening: bool = True
     valign: str = "top"  # "middle": date and amounts centred on the wrapped narration (SBI)
     value_date_below: bool = False  # "(01/04/2025)" printed under the date, in the same column
+    header_once: bool = False  # column header on page 1 only (SBI online statements)
+    print_chrome: bool = False  # browser print header/footer: "19/02/2025, 14:23 ..." and "https://... 2/11"
 
 
 LAYOUTS = {
@@ -152,6 +154,7 @@ LAYOUTS = {
         [("Date (Value Date)", 30, "l"), ("Narration", 110, "l"), ("Ref/Cheque No.", 300, "l"),
          ("Debit", 450, "r"), ("Credit", 520, "r"), ("Balance", 600, "r")],
         "%d/%m/%Y", 30, page_size=(630, 842), valign="middle", value_date_below=True, rows_per_page=18,
+        print_chrome=True, header_once=True,
     ),
     # Same columns with the header wrapped onto two lines and top-aligned rows.
     "sbi_net2": Layout(
@@ -201,6 +204,12 @@ def render(layout: Layout, truths: list[Truth], opening: Decimal) -> bytes:
     pages = [rows[i : i + layout.rows_per_page] for i in range(0, len(rows), layout.rows_per_page)]
 
     for p_no, page_rows in enumerate(pages, start=1):
+        if layout.print_chrome:
+            c.setFont("Helvetica", 7)
+            c.drawString(24, h - 20, "19/02/2025, 14:23")
+            c.drawString(300, h - 20, layout.bank_header[0])
+            c.drawString(24, 22, "https://retail.onlinesbi.sbi/retail/printstatement.htm")
+            c.drawRightString(w - 20, 22, f"{p_no}/{len(pages)}")
         y = h - 40
         if p_no == 1:
             c.setFont("Helvetica-Bold", 11)
@@ -214,7 +223,8 @@ def render(layout: Layout, truths: list[Truth], opening: Decimal) -> bytes:
                 c.setFont("Helvetica", 8)
                 c.drawString(30, y, f"Opening Balance : {inr(opening)}")
                 y -= 18
-        y = _header_cells(c, layout, y)
+        if p_no == 1 or not layout.header_once:
+            y = _header_cells(c, layout, y)
         c.setFont("Helvetica", 7.5)
         bal_x = next(x for title, x, _ in layout.columns if "balance" in title.lower())
         if layout.page_noise and p_no > 1:
