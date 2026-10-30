@@ -3,6 +3,7 @@ engine/data/
 engine/samples/
 engine/tests/fixtures/out/
 *.pdf
+!web/public/sample-hdfc.pdf
 !engine/tests/fixtures/*.py
 
 # Python
