@@ -119,6 +119,9 @@ def test_image_only_statement_is_read_with_ocr(fixtures):
     for got, want in zip(r.transactions, fx.truths):
         assert (got.txn_date, got.debit, got.credit, got.balance) == (want.txn_date, want.debit, want.credit, want.balance)
     assert r.balance_verified
+    # OCR positions are in PDF points too, so rows can be highlighted on scans; rows run down the page.
+    tops = [t.evidence[0][1] for t in r.transactions]
+    assert all(t.evidence and t.evidence[0][0] == 1 for t in r.transactions) and tops == sorted(tops)
 
 
 def test_icici_ruled_rows_three_line_header(fixtures):

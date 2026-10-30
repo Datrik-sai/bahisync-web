@@ -4,7 +4,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { PdfEvidence } from "@/components/PdfEvidence";
 import { PrivacyNote } from "@/components/PrivacyNote";
+import { hasPdf, loadPdf } from "@/lib/pdfStore";
 import { SiteHeader } from "@/components/Wordmark";
 import { downloadExport, formatDate, getLedgers, money, moneyAlways, type ClientRules, type LedgerOption, type Statement, type Txn } from "@/lib/api";
 import {
@@ -83,6 +85,8 @@ export function ReviewScreen({ id }: { id: string }) {
   const [similarOpen, setSimilarOpen] = useState(false);
   const [eduPreview, setEduPreview] = useState(false);
   const [pendingExport, setPendingExport] = useState<ExportKind | null>(null);
+  const [pdfAvailable, setPdfAvailable] = useState(false);
+  const [viewRow, setViewRow] = useState<Txn | null>(null);
   const [notice, setNotice] = useState("");
   const [company, setCompany] = useState("");
   const [bankLedger, setBankLedger] = useState("");
@@ -99,6 +103,8 @@ export function ReviewScreen({ id }: { id: string }) {
     }
     const s = stored.statement;
     setSt(s);
+    if (s.sample) setPdfAvailable(true);
+    else void hasPdf(id).then(setPdfAvailable);
     setClientName(stored.client);
     setClientId(stored.clientId);
     setRules(clientRules(stored.clientId));
@@ -481,6 +487,7 @@ export function ReviewScreen({ id }: { id: string }) {
                       onVoucher={setVoucher}
                       onSuspense={toSuspense}
                       onDecide={decide}
+                      onView={pdfAvailable && t.evidence?.length ? setViewRow : undefined}
                     />
                   ))}
                   {rows.length === 0 && (
@@ -648,6 +655,18 @@ export function ReviewScreen({ id }: { id: string }) {
         />
       )}
 
+      {viewRow && (
+        <PdfEvidence
+          row={viewRow}
+          getPdf={async () => {
+            if (!st.sample) return loadPdf(id);
+            const res = await fetch("/sample-hdfc.pdf");
+            return res.ok ? res.arrayBuffer() : null;
+          }}
+          onClose={() => setViewRow(null)}
+        />
+      )}
+
       {similarOpen && similar && (
         <SimilarModal offer={similar} onApply={applySimilar} onClose={() => setSimilarOpen(false)} />
       )}
@@ -772,6 +791,7 @@ function Row({
   onVoucher,
   onSuspense,
   onDecide,
+  onView,
 }: {
   t: Txn;
   inTally: boolean;
@@ -780,6 +800,7 @@ function Row({
   onVoucher: (t: Txn, v: VoucherType) => void;
   onSuspense: (t: Txn) => void;
   onDecide: (t: Txn, state: ReviewState) => void;
+  onView?: (t: Txn) => void;
 }) {
   const [value, setValue] = useState(t.ledger);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -850,6 +871,11 @@ function Row({
         <span className="block font-medium [overflow-wrap:anywhere]">{t.narration}</span>
         {ref && <span className="mt-0.5 block text-xs text-ink-faint">Ref {ref}</span>}
         {t.note && <span className="mt-0.5 block text-xs text-ledger">Note: {t.note}</span>}
+        {onView && (
+          <button type="button" onClick={() => onView(t)} className="mt-0.5 text-xs font-semibold text-ink-soft underline underline-offset-2 hover:text-ink">
+            View in PDF
+          </button>
+        )}
       </td>
       <td className={`amount px-2 py-2.5 ${excluded ? "line-through" : ""}`}>{money(t.debit)}</td>
       <td className={`amount px-2 py-2.5 ${excluded ? "line-through" : ""}`}>{money(t.credit)}</td>

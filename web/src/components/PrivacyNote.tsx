@@ -28,7 +28,10 @@ export function PrivacyNote({ compact = false }: { compact?: boolean }) {
         It is sent over HTTPS to the BahiSync server (Vercel, Mumbai region) and read in memory there, including OCR for scanned pages, which runs on
         that server with no outside OCR service. Nothing is written to disk or a database, and the file is discarded once the rows are returned.
       </p>
-      <p>The rows, your ledger choices and each client's remembered rules are kept only in this browser. Statements are cleared after 24 hours.</p>
+      <p>
+        The rows, a copy of the PDF (to show each row where it's printed), your ledger choices and each client's remembered rules are kept only in
+        this browser. Statements and their PDFs are cleared after 24 hours.
+      </p>
       {aiLine && <p>{aiLine}</p>}
     </div>
   );

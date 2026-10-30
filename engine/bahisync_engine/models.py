@@ -54,6 +54,9 @@ class Transaction:
     # or "excluded" (leave out of the Tally vouchers; the bank balance will no longer tie in Tally).
     review_state: str = ""
     flags: list[str] = field(default_factory=list)
+    # Where the row is printed: [page, top, bottom] in PDF points from the top of the page,
+    # one entry per page the row appears on. Lets the review screen highlight it in the PDF.
+    evidence: list[list[float]] = field(default_factory=list)
 
     @property
     def amount(self) -> Decimal:

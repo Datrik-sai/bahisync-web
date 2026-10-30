@@ -78,3 +78,24 @@ def test_export_package_zip(fixtures):
     assert "LEFT OUT" in guide and "#1 " in guide and "Import > Masters" in guide
     # No narration text in the guide: it lists row numbers, dates and amounts only.
     assert st["transactions"][0]["narration"][:20] not in guide
+
+
+def test_rows_carry_their_position_in_the_pdf(fixtures):
+    """evidence = [page, top, bottom] covers the printed row, so the review screen can highlight it."""
+    import pdfplumber
+
+    from bahisync_engine.parser import parse_statement
+
+    for name in ("hdfc", "sbi_net", "icici_ruled"):
+        fx = fixtures[name]
+        r = parse_statement(fx.pdf)
+        with pdfplumber.open(io.BytesIO(fx.pdf)) as pdf:
+            for t in r.transactions:
+                assert t.evidence, (name, t.row_no)
+                pg, y0, y1 = t.evidence[0]
+                assert y0 < y1
+                words = pdf.pages[int(pg) - 1].extract_words()
+                inside = " ".join(w["text"] for w in words if w["top"] >= y0 - 0.5 and w["bottom"] <= y1 + 0.5)
+                amount = f"{t.amount:,.2f}"
+                assert amount.replace(",", "") in inside.replace(",", ""), (name, t.row_no, amount)
+        assert txn_from_json(r.transactions[0].to_dict()).evidence == r.transactions[0].evidence

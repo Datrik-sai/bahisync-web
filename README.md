@@ -41,7 +41,11 @@ Bank statement PDF → TallyPrime vouchers, with every row checked against the r
   rows with a box to paste the client's reply.
 - **TallyPrime Educational mode** export option (dates moved to the 1st / 2nd, real date kept in the narration),
   turned on only after previewing every date change.
-- **Sample statement** at `/app/review/sample-hdfc`, no upload needed.
+- **Sample statement** at `/app/review/sample-hdfc`, no upload needed (its synthetic PDF is `web/public/sample-hdfc.pdf`).
+- **See the row in the PDF:** every row carries `evidence` ([page, top, bottom] in PDF points, text and OCR
+  alike). The uploaded PDF is kept in the browser's IndexedDB for 24 hours (`web/src/lib/pdfStore.ts`) and
+  "View in PDF" renders that page with pdf.js, the row highlighted. Password-protected PDFs ask for the
+  password again in the browser; it isn't stored.
 - **Landing page + waitlist** for the validation phase: sample-first, an honest "banks tested" list, and
   the waitlist asks which banks clients use and their Tally version.
 
@@ -51,7 +55,7 @@ Bank statement PDF → TallyPrime vouchers, with every row checked against the r
 # Engine + API
 cd engine
 pip install -r requirements-dev.txt     # also needs tesseract-ocr and poppler-utils for scans
-python -m pytest -q                     # 68 tests
+python -m pytest -q                     # 69 tests
 uvicorn service.app:app --reload --port 8000
 
 # Web (new terminal)

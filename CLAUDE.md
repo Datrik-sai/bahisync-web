@@ -25,6 +25,8 @@ verified against the running balance; that check is the product's promise.
   - `web/src/lib/whatsapp.ts` builds the "ask the client" message and parses their reply.
   - `web/src/lib/recent.ts` holds all browser storage: statements (24 h), per-client rules, Tally masters,
     upload history (row hashes only) for the duplicate check, and the client list behind `/app/clients`.
+  - `web/src/lib/pdfStore.ts` keeps the uploaded PDF in IndexedDB (24 h) for `components/PdfEvidence.tsx`
+    (pdf.js, loaded on demand), which highlights a row from its `evidence` [page, top, bottom].
   - `web/src/components/PrivacyNote.tsx` is the privacy promise shown in the app. Keep it true; update it
     whenever where the PDF goes or who sees it changes.
   The browser calls `/api/*`, which `next.config.ts` rewrites to the engine, except `/api/waitlist`,
@@ -42,7 +44,8 @@ verified against the running balance; that check is the product's promise.
    Rows with `review_state == "excluded"` are skipped in the vouchers XML; a new ledger clears `review_state`.
 7. Tally group names must be TallyPrime's predefined groups (see `TALLY_GROUPS` in `engine/service/app.py`
    and the same list in `web/src/lib/applyChoiceClient.ts`).
-8. After changing the ledger engine, regenerate the demo: `cd engine && python -m tests.fixtures.make_sample`.
+8. After changing the ledger engine, regenerate the demo: `cd engine && python -m tests.fixtures.make_sample`
+   (writes `web/src/lib/sample-hdfc.json` and `web/public/sample-hdfc.pdf`).
 
 ## Adding support for a new bank layout
 1. Put a masked sample in `engine/samples/`, run `python -m bahisync_engine.cli engine/samples/x.pdf`.

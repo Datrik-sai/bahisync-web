@@ -66,13 +66,16 @@ def truths() -> list[Truth]:
     return out
 
 
-def build() -> dict:
+def build_pdf() -> bytes:
     hdfc = LAYOUTS["hdfc"]
     layout = Layout(**{**hdfc.__dict__, "bank_header": [
         "HDFC BANK Ltd.", "Account Branch : BALANAGAR", "RTGS/NEFT IFSC : HDFC0000521",
         "SRI LAKSHMI TRADERS", "Account No : 50200087654321"]})
-    pdf = render(layout, truths(), OPENING)
-    result = parse_statement(pdf)
+    return render(layout, truths(), OPENING)
+
+
+def build() -> dict:
+    result = parse_statement(build_pdf())
     # A returning client: last month's choices for the two regular customers are remembered.
     rules = ClientRules()
     suggest(result.transactions)
@@ -110,3 +113,7 @@ if __name__ == "__main__":
     out = Path(__file__).resolve().parents[3] / "web" / "src" / "lib" / "sample-hdfc.json"
     out.write_text(json.dumps(doc, indent=1))
     print("wrote", out)
+    # The same synthetic PDF, so the demo can show each row where it is printed.
+    pdf_out = Path(__file__).resolve().parents[3] / "web" / "public" / "sample-hdfc.pdf"
+    pdf_out.write_bytes(build_pdf())
+    print("wrote", pdf_out)

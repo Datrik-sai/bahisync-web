@@ -6,6 +6,7 @@
  */
 
 import type { ClientRules, Statement } from "./api";
+import { clearPdfs, deletePdf } from "./pdfStore";
 import sample from "./sample-hdfc.json";
 import type { TallyLedger } from "./tallyMasters";
 
@@ -47,7 +48,11 @@ export function recentStatements(): Recent[] {
   const now = Date.now() / 1000;
   const all = read<Recent[]>(INDEX, []);
   const keep = all.filter((r) => now - r.created_at < DAY);
-  for (const r of all) if (!keep.includes(r)) remove(`bahisync.stmt.${r.id}`);
+  for (const r of all) {
+    if (keep.includes(r)) continue;
+    remove(`bahisync.stmt.${r.id}`);
+    void deletePdf(r.id);
+  }
   if (keep.length !== all.length) write(INDEX, keep);
   return keep;
 }
@@ -88,6 +93,7 @@ export function resetSample(): StoredStatement {
 }
 
 export function forgetStatement(id: string) {
+  void deletePdf(id);
   remove(`bahisync.stmt.${id}`);
   remove(`bahisync.export.${id}`);
   remove(`bahisync.ask.${id}`);
@@ -285,6 +291,7 @@ export function recordHistory(clientId: string, st: Statement) {
 
 /** Remove everything BahiSync keeps in this browser: statements, rules, masters, settings. */
 export function wipeBrowserData() {
+  void clearPdfs();
   try {
     const keys: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {

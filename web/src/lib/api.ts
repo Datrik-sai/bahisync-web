@@ -23,6 +23,8 @@ export type Txn = {
   /** Accountant's decision: "approved" keeps the row as is; "excluded" leaves it out of the Tally vouchers. */
   review_state?: "" | "approved" | "excluded";
   flags: string[];
+  /** Where the row is printed: [page, top, bottom] in PDF points from the page top. */
+  evidence?: [number, number, number][];
 };
 
 export type Summary = {

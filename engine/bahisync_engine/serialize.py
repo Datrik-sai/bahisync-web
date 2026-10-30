@@ -50,6 +50,7 @@ def txn_from_json(d: dict[str, Any]) -> Transaction:
             note=str(d.get("note", ""))[:300],
             review_state=d.get("review_state") if d.get("review_state") in ("approved", "excluded") else "",
             flags=[str(f) for f in d.get("flags", [])][:20],
+            evidence=[[int(e[0]), float(e[1]), float(e[2])] for e in (d.get("evidence") or [])[:5] if len(e) == 3],
         )
     except (KeyError, ValueError, TypeError) as exc:
         raise BadStatement(f"Bad transaction row: {exc}") from exc

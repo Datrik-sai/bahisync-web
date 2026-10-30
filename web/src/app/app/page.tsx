@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { SiteHeader } from "@/components/Wordmark";
 import { ApiError, MAX_UPLOAD_MB as MAX_MB, clientIdFor, parseStatement } from "@/lib/api";
 import { PrivacyNote } from "@/components/PrivacyNote";
+import { savePdf } from "@/lib/pdfStore";
 import {
   clientRules,
   lastClient,
@@ -80,6 +81,7 @@ export default function UploadPage() {
         setBusy(false);
         return;
       }
+      await savePdf(st.id, file); // optional: lets the review screen show each row in the PDF
       router.push(`/app/review/${st.id}`);
     } catch (err) {
       if (err instanceof ApiError && err.code === "password_required") {

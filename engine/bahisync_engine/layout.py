@@ -227,6 +227,17 @@ def _dedupe(cols: list[Column]) -> list[Column]:
     return out
 
 
+POS = "_pos"  # key carrying a line's (page, top, bottom) through the row groupers
+
+
+def _evidence(spans: list[tuple[int, float, float]]) -> list[list[float]]:
+    by_page: dict[int, list[float]] = {}
+    for pg, top, bottom in spans:
+        box = by_page.setdefault(pg, [top, bottom])
+        box[0], box[1] = min(box[0], top), max(box[1], bottom)
+    return [[pg, round(y0, 1), round(y1, 1)] for pg, (y0, y1) in sorted(by_page.items())]
+
+
 @dataclass
 class _Draft:
     date_tokens: list[str]
@@ -239,6 +250,7 @@ class _Draft:
     amount: list[str] = field(default_factory=list)
     drcr: list[str] = field(default_factory=list)
     balance: list[str] = field(default_factory=list)
+    spans: list[tuple[int, float, float]] = field(default_factory=list)  # (page, top, bottom) of each line
 
 
 def extract_rows(pages: list[PageWords]) -> tuple[list[Transaction], Decimal | None, list[str]]:
@@ -296,6 +308,8 @@ def extract_rows(pages: list[PageWords]) -> tuple[list[Transaction], Decimal | N
             for w in line:
                 by_role.setdefault(colmap.role_of(w), []).append(w.text)
             date_tokens = by_role.get("date", [])
+            # Position travels with the line's words, so every grouping mode keeps it.
+            by_role[POS] = [str(pw.page), f"{min(w.top for w in line):.1f}", f"{max(w.bottom for w in line):.1f}"]
             rows.append((line[0].top, by_role, bool(date_tokens and parse_spaced_date(date_tokens))))
 
         if mode is None and any(r[2] for r in rows):
@@ -309,6 +323,9 @@ def extract_rows(pages: list[PageWords]) -> tuple[list[Transaction], Decimal | N
             for by_role in parts:
                 for role in ("narration", "ref", "value_date", "debit", "credit", "amount", "drcr", "balance"):
                     getattr(d, role).extend(by_role.get(role, []))
+                if POS in by_role:
+                    pg, top, bottom = by_role[POS]
+                    d.spans.append((int(pg), float(top), float(bottom)))
         if stopped:
             break
 
@@ -551,4 +568,5 @@ def _finalise(n: int, d: _Draft, colmap: ColumnMap, warnings: list[str]) -> Tran
         value_date=vd[0] if vd else None,
         page=d.page,
         flags=flags,
+        evidence=_evidence(d.spans),
     )
