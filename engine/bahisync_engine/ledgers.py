@@ -313,6 +313,7 @@ def apply_user_choice(
     t.ledger = ledger.strip()
     t.group = SUSPENSE if t.ledger == SUSPENSE else group
     t.ledger_source, t.confidence = "user", 1.0
+    t.review_state = ""  # a new ledger is a new decision: an earlier approve / leave-out no longer applies
     t.flags = [f for f in t.flags if f not in ("one_off", "small_merchant")]
     if voucher in ("Payment", "Receipt", "Contra"):
         t.voucher_type = voucher

@@ -9,7 +9,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 
 from .models import ParseResult
 
-HEADERS = ["#", "Date", "Narration", "Ref / UTR", "Debit", "Credit", "Balance", "Balance check", "Ledger", "Tally group", "Voucher type", "Note", "Flags"]
+HEADERS = ["#", "Date", "Narration", "Ref / UTR", "Debit", "Credit", "Balance", "Balance check", "Ledger", "Tally group", "Voucher type", "Note", "Flags", "Review"]
 FLAG_FILL = PatternFill("solid", fgColor="FFF4CE")
 FAIL_FILL = PatternFill("solid", fgColor="FDE2E1")
 
@@ -36,6 +36,7 @@ def build_excel(result: ParseResult) -> bytes:
             t.voucher_type,
             t.note,
             ", ".join(t.flags),
+            {"approved": "Approved", "excluded": "Left out of Tally"}.get(t.review_state, ""),
         ])
         row = ws[ws.max_row]
         row[1].number_format = "DD-MM-YYYY"
@@ -47,7 +48,7 @@ def build_excel(result: ParseResult) -> bytes:
         elif "needs_review" in t.flags:
             for c in row:
                 c.fill = FLAG_FILL
-    widths = [5, 12, 60, 20, 14, 14, 16, 14, 28, 20, 12, 30, 30]
+    widths = [5, 12, 60, 20, 14, 14, 16, 14, 28, 20, 12, 30, 30, 18]
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[ws.cell(1, i).column_letter].width = w
     for row in ws.iter_rows(min_row=2, min_col=3, max_col=3):

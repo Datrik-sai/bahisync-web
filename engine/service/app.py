@@ -12,11 +12,13 @@ On Vercel:    index.py exposes `app`.
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import os
 import re
 import secrets
 import time
+import zipfile
 from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException
@@ -190,24 +192,99 @@ def export_excel(body: ExportRequest) -> Response:
     )
 
 
+def _masters_xml(body: "ExportRequest", result) -> bytes:
+    used = {t.ledger for t in result.transactions if t.ledger and t.review_state != "excluded"}
+    groups = {str(k): str(v) for k, v in (body.statement.get("groups") or {}).items()}
+    groups.update({t.ledger: t.group for t in result.transactions if t.ledger and t.group})
+    groups = {k: (v if v in TALLY_GROUPS else "Suspense A/c") for k, v in groups.items()}
+    existing = {str(x)[:120] for x in body.existing_ledgers}
+    return build_ledger_masters_xml(body.company.strip(), body.bank_ledger.strip(), groups, used, existing)
+
+
+def _require_names(body: "ExportRequest") -> None:
+    if not body.company.strip() or not body.bank_ledger.strip():
+        raise HTTPException(400, "Company and bank ledger names are required.")
+
+
 @app.post("/api/export/tally/{kind}")
 def export_tally(kind: str, body: ExportRequest) -> Response:
     if kind not in ("vouchers", "ledgers"):
         raise HTTPException(404, "Unknown export.")
-    if not body.company.strip() or not body.bank_ledger.strip():
-        raise HTTPException(400, "Company and bank ledger names are required.")
+    _require_names(body)
     result = _load(body.statement)
     if kind == "ledgers":
-        used = {t.ledger for t in result.transactions if t.ledger}
-        groups = {str(k): str(v) for k, v in (body.statement.get("groups") or {}).items()}
-        groups.update({t.ledger: t.group for t in result.transactions if t.ledger and t.group})
-        groups = {k: (v if v in TALLY_GROUPS else "Suspense A/c") for k, v in groups.items()}
-        existing = {str(x)[:120] for x in body.existing_ledgers}
-        xml = build_ledger_masters_xml(body.company.strip(), body.bank_ledger.strip(), groups, used, existing)
+        xml = _masters_xml(body, result)
     else:
         xml = build_vouchers_xml(result.transactions, body.company.strip(), body.bank_ledger.strip(), body.educational_mode)
     return Response(
         xml,
         media_type="application/xml",
         headers={"Content-Disposition": f'attachment; filename="{_stem(body.statement)}_tally_{kind}.xml"'},
+    )
+
+
+def _n(n: int, one: str, many: str) -> str:
+    return f"{n} {one if n == 1 else many}"
+
+
+def import_guide(body: "ExportRequest", result, stem: str) -> str:
+    excluded = [t for t in result.transactions if t.review_state == "excluded"]
+    suspense = [t for t in result.transactions if t.ledger == SUSPENSE and t.review_state != "excluded"]
+    status = {
+        "verified": "Every row ties to the running balance.",
+        "partial": f"{_n(result.rows_no_balance, 'row had', 'rows had')} no balance printed, so could not be checked.",
+        "mismatch": f"{_n(result.rows_failed, 'row does', 'rows do')} NOT tie to the running balance. Check against the PDF first.",
+        "no_balance": "This statement has no balance column, so rows could not be checked against a running balance.",
+    }[result.balance_status]
+    lines = [
+        "BahiSync export: how to import into TallyPrime",
+        "=" * 46,
+        "",
+        f"Company:       {body.company.strip()}",
+        f"Bank ledger:   {body.bank_ledger.strip()}",
+        f"Statement:     {result.bank or 'Bank'} {result.account_hint}".rstrip(),
+        f"Rows:          {result.rows_total}",
+        f"Balance check: {status}",
+        "",
+        "1. Open the company in TallyPrime. The bank ledger name above must match Tally exactly.",
+        f"2. Gateway of Tally > Import > Masters > {stem}_tally_ledgers.xml",
+        "   This creates any ledgers that don't exist yet.",
+        f"3. Gateway of Tally > Import > Transactions > {stem}_tally_vouchers.xml",
+        "4. Open the bank ledger and compare its closing balance with the statement.",
+        f"5. {stem}.xlsx has every row, its ledger and the balance check, for your working papers.",
+        "",
+    ]
+    if body.educational_mode:
+        lines += ["Educational mode: voucher dates were moved to the 1st or 2nd of the month (the 1st, 2nd and 31st stay).",
+                  "The real date is at the start of each narration.", ""]
+    if suspense:
+        lines += [f"{_n(len(suspense), 'row goes', 'rows go')} to Suspense A/c. Reclassify in Tally once the client confirms.", ""]
+    if excluded:
+        lines += [f"{_n(len(excluded), 'row was', 'rows were')} LEFT OUT of the vouchers on purpose, so Tally's bank balance",
+                  "will differ from the statement by their total. They are marked in the Excel file.", ""]
+        for t in excluded:
+            amt = f"Dr {t.debit:.2f}" if t.debit else f"Cr {t.credit:.2f}"
+            lines.append(f"   #{t.row_no}  {t.txn_date.strftime('%d-%m-%Y')}  {amt}")
+        lines.append("")
+    lines.append("Check a few vouchers in Tally before you rely on the import.")
+    return "\r\n".join(lines) + "\r\n"
+
+
+@app.post("/api/export/package")
+def export_package(body: ExportRequest) -> Response:
+    """One ZIP: ledger masters XML, vouchers XML, Excel and a plain-text import guide."""
+    _require_names(body)
+    result = _load(body.statement)
+    stem = _stem(body.statement)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr(f"{stem}_tally_ledgers.xml", _masters_xml(body, result))
+        z.writestr(f"{stem}_tally_vouchers.xml",
+                   build_vouchers_xml(result.transactions, body.company.strip(), body.bank_ledger.strip(), body.educational_mode))
+        z.writestr(f"{stem}.xlsx", build_excel(result))
+        z.writestr("HOW-TO-IMPORT.txt", import_guide(body, result, stem))
+    return Response(
+        buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{stem}_bahisync.zip"'},
     )

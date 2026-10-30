@@ -48,6 +48,7 @@ def txn_from_json(d: dict[str, Any]) -> Transaction:
             instrument_no=str(d.get("instrument_no", ""))[:40],
             voucher_type=str(d.get("voucher_type", "")),
             note=str(d.get("note", ""))[:300],
+            review_state=d.get("review_state") if d.get("review_state") in ("approved", "excluded") else "",
             flags=[str(f) for f in d.get("flags", [])][:20],
         )
     except (KeyError, ValueError, TypeError) as exc:

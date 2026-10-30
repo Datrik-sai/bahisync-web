@@ -12,12 +12,20 @@ import {
   TALLY_GROUPS,
   VOUCHER_TYPES,
   applyChoice,
+  applyToRows,
+  balanceStatus,
   direction,
+  educationalDate,
+  isPending,
   oneOffUpiRows,
+  prepSummary,
   routeOneOffUpiToSuspense,
   setLedgerGroup,
+  setReviewState,
   setVoucherType,
+  similarRows,
   unclearRows,
+  type ReviewState,
   type VoucherType,
 } from "@/lib/applyChoiceClient";
 import {
@@ -39,8 +47,9 @@ import {
 import { decodeTallyFile, parseTallyMasters, type TallyLedger } from "@/lib/tallyMasters";
 import { WHATSAPP_LINK_LIMIT, buildAskMessage, parseReply, whatsappLink } from "@/lib/whatsapp";
 
-type Filter = "all" | "review" | "suspense" | "mismatch";
-type ExportKind = "ledgers" | "vouchers" | "excel";
+type Filter = "all" | "review" | "suspense" | "mismatch" | "excluded";
+type ExportKind = "ledgers" | "vouchers" | "excel" | "package";
+type SimilarOffer = { ledger: string; group: string; from: number; rows: Txn[] };
 
 const SOURCE_LABEL: Record<string, string> = {
   client_rule: "Remembered",
@@ -69,7 +78,10 @@ export function ReviewScreen({ id }: { id: string }) {
   const [defaults, setDefaults] = useState<LedgerOption[]>([]);
   const [masters, setMasters] = useState<TallyLedger[]>([]);
   const [filter, setFilter] = useState<Filter>("all");
-  const [applySimilar, setApplySimilar] = useState(true);
+  const [similar, setSimilar] = useState<SimilarOffer | null>(null);
+  const [similarOpen, setSimilarOpen] = useState(false);
+  const [eduPreview, setEduPreview] = useState(false);
+  const [pendingExport, setPendingExport] = useState<ExportKind | null>(null);
   const [notice, setNotice] = useState("");
   const [company, setCompany] = useState("");
   const [bankLedger, setBankLedger] = useState("");
@@ -115,9 +127,10 @@ export function ReviewScreen({ id }: { id: string }) {
     const t = st?.transactions ?? [];
     return {
       all: t.length,
-      review: t.filter((x) => x.flags.includes("needs_review")).length,
-      suspense: t.filter((x) => x.flags.includes("suspense")).length,
+      review: t.filter((x) => x.flags.includes("needs_review") && !x.review_state).length,
+      suspense: t.filter((x) => x.flags.includes("suspense") && x.review_state !== "excluded").length,
       mismatch: t.filter((x) => x.balance_ok === false).length,
+      excluded: t.filter((x) => x.review_state === "excluded").length,
     };
   }, [st]);
   const oneOff = useMemo(() => (st ? oneOffUpiRows(st) : []), [st]);
@@ -125,9 +138,10 @@ export function ReviewScreen({ id }: { id: string }) {
 
   const rows = useMemo(() => {
     const t = st?.transactions ?? [];
-    if (filter === "review") return t.filter((x) => x.flags.includes("needs_review"));
-    if (filter === "suspense") return t.filter((x) => x.flags.includes("suspense"));
+    if (filter === "review") return t.filter((x) => x.flags.includes("needs_review") && !x.review_state);
+    if (filter === "suspense") return t.filter((x) => x.flags.includes("suspense") && x.review_state !== "excluded");
     if (filter === "mismatch") return t.filter((x) => x.balance_ok === false);
+    if (filter === "excluded") return t.filter((x) => x.review_state === "excluded");
     return t;
   }, [st, filter]);
 
@@ -154,10 +168,33 @@ export function ReviewScreen({ id }: { id: string }) {
     const name = ledger.trim();
     if (!name) return;
     const canonical = known.get(name.toLowerCase())?.name ?? name;
-    const res = applyChoice(st, t.row_no, { ledger: canonical, group: groupFor(canonical, t), note }, applySimilar, rules);
+    const group = groupFor(canonical, t);
+    const res = applyChoice(st, t.row_no, { ledger: canonical, group, note }, false, rules);
     commit(res.statement, res.rules);
-    const others = res.changed.length - 1;
-    setNotice(others > 0 ? `Set ${canonical} on row ${t.row_no} and ${plural(others, "similar row")}.` : `Set ${canonical} on row ${t.row_no}.`);
+    setNotice(`Set ${canonical} on row ${t.row_no}.`);
+    // Similar rows are never changed silently: offer them, and apply only after the accountant has seen the list.
+    const more = similarRows(res.statement, t.row_no, canonical);
+    setSimilar(more.length ? { ledger: canonical, group: res.statement.transactions.find((x) => x.row_no === t.row_no)?.group ?? group, from: t.row_no, rows: more } : null);
+  }
+
+  function applySimilar(rowNos: number[]) {
+    if (!st || !similar) return;
+    commit(applyToRows(st, rowNos, similar.ledger, similar.group));
+    setNotice(`Set ${similar.ledger} on ${plural(rowNos.length, "more row")}.`);
+    setSimilar(null);
+    setSimilarOpen(false);
+  }
+
+  function decide(t: Txn, state: ReviewState) {
+    if (!st) return;
+    commit(setReviewState(st, [t.row_no], state));
+    setNotice(
+      state === "excluded"
+        ? `Row ${t.row_no} will be left out of the Tally vouchers. Tally's bank balance won't match the statement by ₹${money(Number(t.debit) ? t.debit : t.credit)}.`
+        : state === "approved"
+          ? `Row ${t.row_no} approved as it is.`
+          : `Row ${t.row_no} is back in review.`,
+    );
   }
 
   function setGroup(t: Txn, group: string) {
@@ -192,6 +229,7 @@ export function ReviewScreen({ id }: { id: string }) {
     setExporting(kind);
     setExportError("");
     try {
+      setPendingExport(null);
       await downloadExport(st, kind, company.trim(), bankLedger.trim(), {
         educationalMode: educational,
         existingLedgers: masters.map((m) => m.name),
@@ -258,7 +296,40 @@ export function ReviewScreen({ id }: { id: string }) {
   }
 
   const s = st.summary;
-  const exportReady = company.trim() && bankLedger.trim();
+  const exportReady = Boolean(company.trim() && bankLedger.trim());
+  const status = balanceStatus(st);
+  const prep = prepSummary(st);
+  const mismatchOpen = st.transactions.filter((t) => t.balance_ok === false && !t.review_state).length;
+  const suspenseOpen = st.transactions.filter((t) => t.ledger === SUSPENSE && !t.review_state).length;
+  const reviewOpen = st.transactions.filter((t) => t.flags.includes("needs_review") && t.ledger !== SUSPENSE && t.balance_ok !== false && !t.review_state).length;
+  const excludedRows = st.transactions.filter((t) => t.review_state === "excluded");
+  const excludedTotal = excludedRows.reduce((sum, t) => sum + Number(t.credit) - Number(t.debit), 0);
+  const checks: Check[] = [
+    { ok: Boolean(company.trim()), label: "Company name entered", hard: true },
+    { ok: Boolean(bankLedger.trim()), label: "Bank ledger name entered", hard: true },
+    status === "mismatch"
+      ? { ok: mismatchOpen === 0, label: mismatchOpen ? `${plural(mismatchOpen, "balance mismatch", "balance mismatches")} not checked against the PDF` : "Balance mismatches checked against the PDF" }
+      : status === "no_balance"
+        ? { ok: false, label: "No balance column: compare totals with the PDF yourself", info: true }
+        : status === "partial"
+          ? { ok: true, label: `Balance check passed (${plural(s.rows_no_balance ?? 0, "row")} had no balance)` }
+          : { ok: true, label: "Every row ties to the running balance" },
+    { ok: reviewOpen === 0, label: reviewOpen ? `${plural(reviewOpen, "suggested ledger")} not reviewed yet` : "Suggested ledgers reviewed" },
+    { ok: suspenseOpen === 0, label: suspenseOpen ? `${plural(suspenseOpen, "Suspense row")} not approved` : "Suspense rows approved or resolved" },
+    { ok: prep.contraProblems === 0, label: prep.contraProblems ? `${plural(prep.contraProblems, "Contra voucher")} without a Bank or Cash ledger` : "Voucher types set" },
+  ];
+  if (excludedRows.length) {
+    checks.push({ ok: false, info: true, label: `${plural(excludedRows.length, "row")} left out: Tally's bank balance will be off by ₹${moneyAlways(String(Math.abs(excludedTotal)))}` });
+  }
+  const openChecks = checks.filter((c) => !c.ok && !c.hard && !c.info).length;
+
+  function requestExport(kind: ExportKind) {
+    if ((kind === "vouchers" || kind === "package") && openChecks > 0) {
+      setPendingExport(kind);
+      return;
+    }
+    void exportFile(kind);
+  }
 
   return (
     <>
@@ -296,8 +367,9 @@ export function ReviewScreen({ id }: { id: string }) {
               {clientName && `, for ${clientName}`}
             </p>
           </div>
-          <BalanceBadge verified={s.balance_verified} failed={s.rows_failed} total={s.rows_total} />
         </div>
+
+        <StatusPanels status={status} summary={s} prep={prep} />
 
         <dl className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-rule-strong bg-rule-strong sm:grid-cols-4">
           <Stat label="Opening balance" value={moneyAlways(s.opening_balance)} />
@@ -323,6 +395,7 @@ export function ReviewScreen({ id }: { id: string }) {
                   ["review", "Needs review"],
                   ["suspense", "Suspense"],
                   ["mismatch", "Balance mismatch"],
+                  ...(counts.excluded > 0 || filter === "excluded" ? [["excluded", "Left out"]] : []),
                 ] as [Filter, string][]).map(([key, label]) => (
                   <button
                     key={key}
@@ -341,15 +414,12 @@ export function ReviewScreen({ id }: { id: string }) {
                 disabled={unclear.length === 0}
                 className="rounded-md bg-ledger px-3.5 py-2 text-sm font-semibold text-white hover:bg-[#25573a] disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Ask client on WhatsApp <span className="tabular-nums opacity-80">({unclear.length} rows)</span>
+                Request clarification from client <span className="tabular-nums opacity-80">({unclear.length})</span>
               </button>
             </div>
 
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-              <label className="flex items-center gap-2 text-sm text-ink-soft">
-                <input type="checkbox" checked={applySimilar} onChange={(e) => setApplySimilar(e.target.checked)} className="h-4 w-4 accent-[#1c2a5a]" />
-                Apply my choice to similar rows
-              </label>
+              <p className="text-sm text-ink-soft">A ledger you set applies to that row only. Similar rows are offered for you to check first.</p>
               <button
                 type="button"
                 onClick={sendOneOffsToSuspense}
@@ -360,7 +430,20 @@ export function ReviewScreen({ id }: { id: string }) {
                 Send {oneOff.length} one-time UPI {oneOff.length === 1 ? "name" : "names"} to Suspense A/c
               </button>
             </div>
-            <p className="mt-2 min-h-5 text-sm text-ledger" aria-live="polite">{notice}</p>
+            <div className="mt-2 flex min-h-5 flex-wrap items-center gap-x-3 gap-y-1 text-sm" aria-live="polite">
+              <span className="text-ledger">{notice}</span>
+              {similar && (
+                <span className="text-ink">
+                  {plural(similar.rows.length, "similar row")} could also go to {similar.ledger}.{" "}
+                  <button type="button" onClick={() => setSimilarOpen(true)} className="font-semibold underline underline-offset-4">
+                    Review and apply
+                  </button>{" "}
+                  <button type="button" onClick={() => setSimilar(null)} className="text-ink-soft underline underline-offset-4">
+                    Dismiss
+                  </button>
+                </span>
+              )}
+            </div>
 
             <div className="relative mt-2 overflow-x-auto rounded-lg border border-rule-strong bg-sheet">
               <table className="w-full min-w-[62rem] table-fixed border-collapse text-[0.84rem]">
@@ -386,6 +469,7 @@ export function ReviewScreen({ id }: { id: string }) {
                       onGroup={setGroup}
                       onVoucher={setVoucher}
                       onSuspense={toSuspense}
+                      onDecide={decide}
                     />
                   ))}
                   {rows.length === 0 && (
@@ -452,8 +536,12 @@ export function ReviewScreen({ id }: { id: string }) {
                 type="checkbox"
                 checked={educational}
                 onChange={(e) => {
-                  setEducational(e.target.checked);
-                  persistExport({ educationalMode: e.target.checked });
+                  if (e.target.checked) {
+                    setEduPreview(true); // turned on only after the date changes are confirmed
+                    return;
+                  }
+                  setEducational(false);
+                  persistExport({ educationalMode: false });
                 }}
                 className="mt-0.5 h-4 w-4 shrink-0 accent-[#1c2a5a]"
               />
@@ -466,32 +554,65 @@ export function ReviewScreen({ id }: { id: string }) {
               </span>
             </label>
 
-            {counts.suspense > 0 && (
-              <p className="mt-4 rounded-md bg-review-bg px-3 py-2 text-sm text-review">
-                {plural(counts.suspense, "row")} will be posted to Suspense A/c unless you pick a ledger.
-              </p>
-            )}
-            {counts.mismatch > 0 && (
-              <p className="mt-3 rounded-md bg-mismatch-bg px-3 py-2 text-sm text-mismatch">
-                {counts.mismatch} row{counts.mismatch > 1 ? "s don't" : " doesn't"} tie to the balance. Check them against the PDF before importing.
-              </p>
+            <h3 className="mt-5 text-sm font-semibold">Before you import</h3>
+            <ul className="mt-2 grid gap-1.5 text-sm" aria-label="Pre-export checklist">
+              {checks.map((c) => (
+                <li key={c.label} className={`flex gap-2 ${c.ok ? "text-ink-soft" : c.info ? "text-review" : c.hard ? "text-mismatch" : "text-review"}`}>
+                  <span aria-hidden className="w-4 shrink-0 text-center font-bold">{c.ok ? "✓" : "!"}</span>
+                  <span>
+                    <span className="sr-only">{c.ok ? "Done: " : "Open: "}</span>
+                    {c.label}
+                  </span>
+                </li>
+              ))}
+            </ul>
+
+            <div className="mt-5">
+              <DownloadButton
+                disabled={!exportReady}
+                busy={exporting === "package"}
+                onClick={() => requestExport("package")}
+                label="Download for Tally (ZIP)"
+                primary
+              />
+              <p className="mt-1 text-xs text-ink-faint">Ledger masters XML, vouchers XML, the Excel sheet and a step-by-step import guide.</p>
+            </div>
+
+            {pendingExport && (
+              <div role="alertdialog" aria-labelledby="open-checks" className="mt-3 rounded-md border border-review bg-review-bg px-3 py-3 text-sm">
+                <p id="open-checks" className="text-review">
+                  {plural(openChecks, "check is", "checks are")} still open. Unreviewed rows will import with their suggested ledger, and Suspense rows go to
+                  Suspense A/c.
+                </p>
+                <div className="mt-2 flex gap-3">
+                  <button type="button" onClick={() => void exportFile(pendingExport)} className="rounded bg-ink px-3 py-1.5 font-semibold text-white">
+                    Download anyway
+                  </button>
+                  <button type="button" onClick={() => setPendingExport(null)} className="font-semibold text-ink-soft underline underline-offset-4">
+                    Keep reviewing
+                  </button>
+                </div>
+              </div>
             )}
 
-            <ol className="mt-5 grid gap-3">
-              <li>
-                <DownloadButton disabled={!exportReady} busy={exporting === "ledgers"} onClick={() => exportFile("ledgers")} label="1. Ledger masters (XML)" />
-                <p className="mt-1 text-xs text-ink-faint">
-                  In TallyPrime: Import, then Masters. Creates ledgers that don't exist yet{masters.length > 0 ? "; ledgers already in Tally are left out" : ""}.
-                </p>
-              </li>
-              <li>
-                <DownloadButton disabled={!exportReady} busy={exporting === "vouchers"} onClick={() => exportFile("vouchers")} label="2. Vouchers (XML)" primary />
-                <p className="mt-1 text-xs text-ink-faint">Then Import, then Transactions. Payment, Receipt and Contra entries.</p>
-              </li>
-              <li>
-                <DownloadButton busy={exporting === "excel"} onClick={() => exportFile("excel")} label="Excel sheet" />
-              </li>
-            </ol>
+            <details className="mt-4 text-sm">
+              <summary className="cursor-pointer font-semibold text-ink-soft">Separate files</summary>
+              <ol className="mt-3 grid gap-3">
+                <li>
+                  <DownloadButton disabled={!exportReady} busy={exporting === "ledgers"} onClick={() => requestExport("ledgers")} label="1. Ledger masters (XML)" />
+                  <p className="mt-1 text-xs text-ink-faint">
+                    In TallyPrime: Import, then Masters. Creates ledgers that don't exist yet{masters.length > 0 ? "; ledgers already in Tally are left out" : ""}.
+                  </p>
+                </li>
+                <li>
+                  <DownloadButton disabled={!exportReady} busy={exporting === "vouchers"} onClick={() => requestExport("vouchers")} label="2. Vouchers (XML)" />
+                  <p className="mt-1 text-xs text-ink-faint">Then Import, then Transactions. Payment, Receipt and Contra entries; left-out rows are skipped.</p>
+                </li>
+                <li>
+                  <DownloadButton busy={exporting === "excel"} onClick={() => requestExport("excel")} label="Excel sheet" />
+                </li>
+              </ol>
+            </details>
             <p className="mt-2 min-h-5 text-sm text-mismatch" aria-live="polite">{exportError}</p>
 
             <div className="mt-6 grid gap-2 border-t border-rule pt-4 text-sm text-ink-soft">
@@ -518,6 +639,23 @@ export function ReviewScreen({ id }: { id: string }) {
           onClose={() => setAsking(false)}
         />
       )}
+
+      {similarOpen && similar && (
+        <SimilarModal offer={similar} onApply={applySimilar} onClose={() => setSimilarOpen(false)} />
+      )}
+
+      {eduPreview && (
+        <EducationalModal
+          rows={st.transactions.filter((t) => t.review_state !== "excluded")}
+          onConfirm={() => {
+            setEducational(true);
+            persistExport({ educationalMode: true });
+            setEduPreview(false);
+            setNotice("Educational mode is on: voucher dates will move as shown, with the real date in each narration.");
+          }}
+          onClose={() => setEduPreview(false)}
+        />
+      )}
     </>
   );
 }
@@ -526,18 +664,52 @@ function Kbd({ children }: { children: React.ReactNode }) {
   return <kbd className="rounded border border-rule-strong bg-paper px-1 py-px font-sans text-[0.7rem] text-ink-soft">{children}</kbd>;
 }
 
-function BalanceBadge({ verified, failed, total }: { verified: boolean; failed: number; total: number }) {
-  if (verified) {
-    return (
-      <p className="rounded-md border border-ledger bg-ok-bg px-4 py-2.5 font-semibold text-ok">
-        Balanced: all {total} rows tie to the running balance
-      </p>
-    );
-  }
+type Check = { ok: boolean; label: string; hard?: boolean; info?: boolean };
+
+const STATUS_COPY: Record<string, { title: string; tone: string }> = {
+  verified: { title: "Balanced", tone: "border-ledger bg-ok-bg text-ok" },
+  partial: { title: "Balanced where printed", tone: "border-ledger bg-ok-bg text-ok" },
+  mismatch: { title: "Doesn't tie", tone: "border-mismatch bg-mismatch-bg text-mismatch" },
+  no_balance: { title: "Not checkable", tone: "border-review bg-review-bg text-review" },
+};
+
+function StatusPanels({ status, summary, prep }: { status: string; summary: Statement["summary"]; prep: ReturnType<typeof prepSummary> }) {
+  const copy = STATUS_COPY[status] ?? STATUS_COPY.mismatch;
+  const total = summary.rows_total;
+  const detail =
+    status === "verified"
+      ? `All ${total} rows tie to the running balance.`
+      : status === "partial"
+        ? `${total - (summary.rows_no_balance ?? 0)} rows tie; ${plural(summary.rows_no_balance ?? 0, "row")} had no balance printed to check.`
+        : status === "mismatch"
+          ? `${summary.rows_failed} of ${total} rows don't tie to the running balance. Check them against the PDF.`
+          : "This statement has no balance column, so rows can't be checked. Compare the totals with the PDF.";
   return (
-    <p className="rounded-md border border-mismatch bg-mismatch-bg px-4 py-2.5 font-semibold text-mismatch">
-      {failed} of {total} rows don't tie. Review them before importing
-    </p>
+    <div className="mt-6 grid gap-3 md:grid-cols-2">
+      <section aria-label="Statement validation" className={`rounded-lg border px-4 py-3 ${copy.tone}`}>
+        <h2 className="text-xs font-semibold uppercase tracking-wide opacity-80">Statement validation</h2>
+        <p className="mt-0.5 text-lg font-[720]">{copy.title}</p>
+        <p className="text-sm">{detail}</p>
+      </section>
+      <section aria-label="Voucher preparation" className="rounded-lg border border-rule-strong bg-sheet px-4 py-3">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Voucher preparation</h2>
+        <dl className="mt-1 grid grid-cols-4 gap-2 text-sm">
+          <PrepStat label="Mapped" value={prep.mapped} />
+          <PrepStat label="To review" value={prep.pending} tone={prep.pending ? "text-review" : ""} />
+          <PrepStat label="In Suspense" value={prep.suspense} />
+          <PrepStat label="Left out" value={prep.excluded} tone={prep.excluded ? "text-mismatch" : ""} />
+        </dl>
+      </section>
+    </div>
+  );
+}
+
+function PrepStat({ label, value, tone = "" }: { label: string; value: number; tone?: string }) {
+  return (
+    <div>
+      <dt className="text-ink-soft">{label}</dt>
+      <dd className={`text-lg font-[720] tabular-nums ${tone}`}>{value}</dd>
+    </div>
   );
 }
 
@@ -591,6 +763,7 @@ function Row({
   onGroup,
   onVoucher,
   onSuspense,
+  onDecide,
 }: {
   t: Txn;
   inTally: boolean;
@@ -598,6 +771,7 @@ function Row({
   onGroup: (t: Txn, group: string) => void;
   onVoucher: (t: Txn, v: VoucherType) => void;
   onSuspense: (t: Txn) => void;
+  onDecide: (t: Txn, state: ReviewState) => void;
 }) {
   const [value, setValue] = useState(t.ledger);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -643,7 +817,10 @@ function Row({
     }
   }
 
-  const rowTone = mismatch ? "bg-mismatch-bg/60" : review ? "bg-review-bg/40" : "";
+  const excluded = t.review_state === "excluded";
+  const pending = isPending(t);
+  const approveLabel = mismatch ? "Checked against PDF" : t.ledger === SUSPENSE ? "Keep in Suspense" : "Looks right";
+  const rowTone = excluded ? "opacity-60" : mismatch ? "bg-mismatch-bg/60" : review && pending ? "bg-review-bg/40" : "";
   let badge = SOURCE_LABEL[t.ledger_source] ?? "";
   let badgeTitle = badge;
   if (inTally) {
@@ -666,8 +843,8 @@ function Row({
         {ref && <span className="mt-0.5 block text-xs text-ink-faint">Ref {ref}</span>}
         {t.note && <span className="mt-0.5 block text-xs text-ledger">Note: {t.note}</span>}
       </td>
-      <td className="amount px-2 py-2.5">{money(t.debit)}</td>
-      <td className="amount px-2 py-2.5">{money(t.credit)}</td>
+      <td className={`amount px-2 py-2.5 ${excluded ? "line-through" : ""}`}>{money(t.debit)}</td>
+      <td className={`amount px-2 py-2.5 ${excluded ? "line-through" : ""}`}>{money(t.credit)}</td>
       <td className="amount px-2 py-2.5">
         <span className={mismatch ? "font-semibold text-mismatch" : ""}>{moneyAlways(t.balance)}</span>
         {mismatch && <span className="block text-xs text-mismatch">expected {moneyAlways(t.expected_balance)}</span>}
@@ -715,6 +892,30 @@ function Row({
             </span>
           </div>
         </form>
+        {t.review_state ? (
+          <p className={`mt-1.5 text-xs ${excluded ? "font-semibold text-mismatch" : "text-ok"}`}>
+            {excluded ? "Left out of Tally" : t.ledger === SUSPENSE ? "Suspense approved" : "Approved"} ·{" "}
+            <button type="button" onClick={() => onDecide(t, "")} className="font-normal text-ink-soft underline underline-offset-2">
+              Undo
+            </button>
+          </p>
+        ) : (
+          (pending || t.ledger === SUSPENSE) && (
+            <div className="mt-1.5 flex flex-wrap gap-x-3 text-xs">
+              <button type="button" onClick={() => onDecide(t, "approved")} className="font-semibold text-ink underline underline-offset-2">
+                {approveLabel}
+              </button>
+              <button
+                type="button"
+                onClick={() => onDecide(t, "excluded")}
+                title="Skip this row in the vouchers file. Tally's bank balance will then differ from the statement."
+                className="text-ink-soft underline underline-offset-2"
+              >
+                Leave out
+              </button>
+            </div>
+          )
+        )}
       </td>
       <td className="px-2 py-2 pr-4">
         <select
@@ -766,7 +967,9 @@ function AskModal({
 
   const byNo = useMemo(() => new Map(all.map((t) => [t.row_no, t])), [all]);
   const listed = useMemo(() => items.map((n) => byNo.get(n)).filter((t): t is Txn => Boolean(t)), [items, byNo]);
-  const message = useMemo(() => buildAskMessage(client, listed), [client, listed]);
+  const built = useMemo(() => buildAskMessage(client, listed), [client, listed]);
+  const [edited, setEdited] = useState<string | null>(null);
+  const message = edited ?? built;
   const answers = useMemo(() => parseReply(reply, listed.length), [reply, listed.length]);
   const tooLong = message.length > WHATSAPP_LINK_LIMIT;
 
@@ -798,7 +1001,7 @@ function AskModal({
       >
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 id="ask-title" className="text-xl font-[720]">Ask {client || "the client"} on WhatsApp</h2>
+            <h2 id="ask-title" className="text-xl font-[720]">Request clarification from {client || "the client"}</h2>
             <p className="mt-1 text-sm text-ink-soft">{plural(listed.length, "unclear row")}: Suspense or needing review. Balance mismatches are left out.</p>
             {stale && (
               <p className="mt-1 text-sm text-review">
@@ -812,6 +1015,7 @@ function AskModal({
                     setItems(nums);
                     setReply("");
                     setDone({});
+                    setEdited(null);
                   }}
                 >
                   Start a new list ({rows.length})
@@ -824,7 +1028,24 @@ function AskModal({
           </button>
         </div>
 
-        <textarea readOnly value={message} rows={Math.min(14, listed.length + 5)} className="mt-4 w-full rounded-md border border-rule-strong bg-paper p-3 font-sans text-sm leading-relaxed" aria-label="Message to send" />
+        <textarea
+          value={message}
+          onChange={(e) => setEdited(e.target.value)}
+          rows={Math.min(14, listed.length + 5)}
+          className="mt-4 w-full rounded-md border border-rule-strong bg-paper p-3 font-sans text-sm leading-relaxed"
+          aria-label="Message to send"
+        />
+        <p className="mt-1 text-xs text-ink-faint">
+          Edit freely before sending. Keep the item numbers so the client's reply matches the rows.
+          {edited !== null && (
+            <>
+              {" "}
+              <button type="button" onClick={() => setEdited(null)} className="font-semibold text-ink-soft underline underline-offset-2">
+                Reset message
+              </button>
+            </>
+          )}
+        </p>
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <button type="button" onClick={() => void copy()} className="rounded-md border border-ink/30 px-4 py-2 font-semibold text-ink hover:border-ink">
             {copied ? "Copied" : "Copy message"}
@@ -893,5 +1114,122 @@ function AskModal({
         </div>
       </div>
     </div>
+  );
+}
+
+function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    closeRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={onClose}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onClick={(e) => e.stopPropagation()}
+        className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-rule-strong bg-sheet p-5 shadow-xl sm:p-6"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <h2 className="text-xl font-[720]">{title}</h2>
+          <button ref={closeRef} type="button" onClick={onClose} className="rounded px-2 py-1 text-sm font-semibold text-ink-soft hover:text-ink">
+            Close
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function SimilarModal({ offer, onApply, onClose }: { offer: SimilarOffer; onApply: (rowNos: number[]) => void; onClose: () => void }) {
+  const [picked, setPicked] = useState<Set<number>>(() => new Set(offer.rows.map((t) => t.row_no)));
+  function toggle(n: number) {
+    setPicked((p) => {
+      const next = new Set(p);
+      if (next.has(n)) next.delete(n);
+      else next.add(n);
+      return next;
+    });
+  }
+  return (
+    <Modal title={`Apply ${offer.ledger} to similar rows?`} onClose={onClose}>
+      <p className="mt-1 text-sm text-ink-soft">
+        Same counterparty and direction as row {offer.from}. Untick any that are different. Rows you've already set yourself aren't listed.
+      </p>
+      <ul className="mt-4 grid gap-1.5 text-sm">
+        {offer.rows.map((t) => (
+          <li key={t.row_no}>
+            <label className="flex gap-2 rounded border border-rule px-3 py-2">
+              <input type="checkbox" checked={picked.has(t.row_no)} onChange={() => toggle(t.row_no)} className="mt-0.5 h-4 w-4 shrink-0 accent-[#1c2a5a]" />
+              <span className="min-w-0">
+                <span className="tabular-nums text-ink-soft">
+                  #{t.row_no} · {formatDate(t.txn_date)} · ₹{money(Number(t.debit) ? t.debit : t.credit)}
+                </span>
+                <span className="block [overflow-wrap:anywhere]">{t.narration}</span>
+                <span className="block text-xs text-ink-faint">Now: {t.ledger || "no ledger"}</span>
+              </span>
+            </label>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-4 flex gap-3">
+        <button
+          type="button"
+          disabled={picked.size === 0}
+          onClick={() => onApply([...picked])}
+          className="rounded-md bg-ink px-4 py-2 font-semibold text-white disabled:opacity-50"
+        >
+          Apply to {plural(picked.size, "row")}
+        </button>
+        <button type="button" onClick={onClose} className="font-semibold text-ink-soft underline underline-offset-4">
+          Cancel
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function EducationalModal({ rows, onConfirm, onClose }: { rows: Txn[]; onConfirm: () => void; onClose: () => void }) {
+  const moved = rows.filter((t) => educationalDate(t.txn_date) !== t.txn_date);
+  return (
+    <Modal title="Turn on Educational mode?" onClose={onClose}>
+      <p className="mt-1 text-sm text-ink-soft">
+        TallyPrime Educational mode only accepts vouchers dated the 1st, 2nd or 31st. {plural(moved.length, "voucher")} of {rows.length} will get a
+        different date in Tally; the real date goes at the start of the narration. Use this only for practice companies, never for real books.
+      </p>
+      <div className="mt-4 max-h-80 overflow-y-auto rounded border border-rule">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-rule text-left text-ink-soft">
+              <th className="px-3 py-2 font-semibold">#</th>
+              <th className="px-3 py-2 font-semibold">Statement date</th>
+              <th className="px-3 py-2 font-semibold">Date in Tally</th>
+            </tr>
+          </thead>
+          <tbody>
+            {moved.map((t) => (
+              <tr key={t.row_no} className="border-b border-rule last:border-b-0">
+                <td className="px-3 py-1.5 text-ink-faint">{t.row_no}</td>
+                <td className="px-3 py-1.5 tabular-nums">{formatDate(t.txn_date)}</td>
+                <td className="px-3 py-1.5 tabular-nums font-semibold">{formatDate(educationalDate(t.txn_date))}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-4 flex gap-3">
+        <button type="button" onClick={onConfirm} className="rounded-md bg-ink px-4 py-2 font-semibold text-white">
+          Use these dates
+        </button>
+        <button type="button" onClick={onClose} className="font-semibold text-ink-soft underline underline-offset-4">
+          Keep real dates
+        </button>
+      </div>
+    </Modal>
   );
 }

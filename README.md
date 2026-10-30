@@ -18,9 +18,12 @@ Bank statement PDF → TallyPrime vouchers, with every row checked against the r
 - **Ledger suggestions:** remembered per client from your corrections, then built-in rules (ATM/cash,
   GST, TDS, bank charges, interest, electricity, rent, insurance…), optional AI, then the counterparty
   name from UPI/NEFT/IMPS/cheque narrations, else Suspense A/c.
-- **Review screen:** filter to rows needing review, Suspense or balance mismatches; one correction can
-  apply to similar rows in the statement and is remembered for next month.
-- **Exports:** Tally ledger masters XML, Tally vouchers XML (Payment / Receipt / Contra), Excel.
+- **Review screen:** "Statement validation" (balance check, including statements with no balance column)
+  is shown separately from "Voucher preparation" (mapped / to review / Suspense / left out). A correction
+  applies to its row only; similar rows are offered in a preview to confirm. Flagged rows can be approved
+  (e.g. "Keep in Suspense") or left out of the vouchers, with a warning that Tally's balance will differ.
+- **Exports:** one ZIP (ledger masters XML, vouchers XML, Excel and a HOW-TO-IMPORT guide) behind a
+  pre-export checklist; separate files are still available.
 - **Privacy:** the server is stateless. PDFs are processed in memory; the extracted rows and remembered
   ledgers live only in the user's browser (statements cleared after 24 hours).
 - **Long statements:** repeated headers, Page Total, Carried / Brought Forward and dated summary rows are
@@ -32,7 +35,8 @@ Bank statement PDF → TallyPrime vouchers, with every row checked against the r
 - **Review screen:** instant edits in the browser, Tally group and voucher type per row, keyboard
   shortcuts, client's existing Tally masters loaded from their XML, and a WhatsApp message listing unclear
   rows with a box to paste the client's reply.
-- **TallyPrime Educational mode** export option (dates moved to the 1st / 2nd, real date kept in the narration).
+- **TallyPrime Educational mode** export option (dates moved to the 1st / 2nd, real date kept in the narration),
+  turned on only after previewing every date change.
 - **Sample statement** at `/app/review/sample-hdfc`, no upload needed.
 - **Landing page + waitlist** for the validation phase.
 
@@ -42,7 +46,7 @@ Bank statement PDF → TallyPrime vouchers, with every row checked against the r
 # Engine + API
 cd engine
 pip install -r requirements-dev.txt     # also needs tesseract-ocr and poppler-utils for scans
-python -m pytest -q                     # 62 tests
+python -m pytest -q                     # 68 tests
 uvicorn service.app:app --reload --port 8000
 
 # Web (new terminal)

@@ -74,6 +74,8 @@ function choose(t: Txn, ledger: string, group: string, voucher?: VoucherType, no
     group: name === SUSPENSE ? SUSPENSE : group,
     ledger_source: "user",
     confidence: 1,
+    // A new ledger is a new decision: an earlier approve / leave-out no longer applies.
+    review_state: "",
     flags: t.flags.filter((f) => f !== "one_off" && f !== "small_merchant"),
   };
   if (note !== undefined) next.note = note.trim();
@@ -167,11 +169,88 @@ export function routeOneOffUpiToSuspense(st: Statement): { statement: Statement;
 }
 
 /**
- * Rows to ask the client about: Suspense or still needing review. Balance
- * mismatches are left out: those are checked against the PDF, not the client.
+ * Rows to ask the client about: Suspense or still needing review, not yet
+ * approved or left out. Balance mismatches are checked against the PDF, not the client.
  */
 export function unclearRows(st: Statement): Txn[] {
   return st.transactions.filter(
-    (t) => t.balance_ok !== false && (t.flags.includes("suspense") || t.flags.includes("needs_review")),
+    (t) => !t.review_state && t.balance_ok !== false && (t.flags.includes("suspense") || t.flags.includes("needs_review")),
   );
+}
+
+/**
+ * Rows that "apply to similar" would change if `ledger` were set on `rowNo`:
+ * same direction and counterparty, not already set by the accountant.
+ */
+export function similarRows(st: Statement, rowNo: number, ledger: string): Txn[] {
+  const target = st.transactions.find((t) => t.row_no === rowNo);
+  if (!target || ledger.trim() === SUSPENSE) return [];
+  return st.transactions.filter(
+    (t) =>
+      t.row_no !== rowNo &&
+      t.ledger_source !== "user" &&
+      t.ledger !== ledger.trim() &&
+      direction(t) === direction(target) &&
+      matchKey(t) === matchKey(target),
+  );
+}
+
+/** Set one ledger on chosen rows (after the accountant confirmed the preview). */
+export function applyToRows(st: Statement, rowNos: number[], ledger: string, group: string): Statement {
+  const ids = new Set(rowNos);
+  const g = TALLY_GROUPS.includes(group) ? group : SUSPENSE;
+  const txns = st.transactions.map((t) => (ids.has(t.row_no) ? choose(t, ledger, g) : t));
+  return { ...st, transactions: txns, groups: { ...st.groups, [ledger.trim()]: g } };
+}
+
+export type ReviewState = "" | "approved" | "excluded";
+
+/** Approve a row as it is, leave it out of the Tally vouchers, or undo either. */
+export function setReviewState(st: Statement, rowNos: number[], state: ReviewState): Statement {
+  const ids = new Set(rowNos);
+  return { ...st, transactions: st.transactions.map((t) => (ids.has(t.row_no) ? { ...t, review_state: state } : t)) };
+}
+
+/** Flagged rows (review, Suspense or balance mismatch) the accountant hasn't decided on yet. */
+export function isPending(t: Txn): boolean {
+  if (t.review_state) return false;
+  return t.balance_ok === false || t.flags.includes("needs_review") || t.flags.includes("suspense");
+}
+
+export type PrepSummary = { mapped: number; pending: number; suspense: number; excluded: number; contraProblems: number };
+
+/** Voucher preparation, separate from the balance check. */
+export function prepSummary(st: Statement): PrepSummary {
+  const s: PrepSummary = { mapped: 0, pending: 0, suspense: 0, excluded: 0, contraProblems: 0 };
+  for (const t of st.transactions) {
+    if (t.review_state === "excluded") {
+      s.excluded++;
+      continue;
+    }
+    if (t.voucher_type === "Contra" && !CASH_BANK_GROUPS.has(t.group ?? "")) s.contraProblems++;
+    if (isPending(t)) s.pending++;
+    else if (t.ledger === SUSPENSE) s.suspense++;
+    else s.mapped++;
+  }
+  return s;
+}
+
+export type BalanceStatus = "verified" | "mismatch" | "partial" | "no_balance";
+
+/** Same rule as ParseResult.balance_status; computed here for statements parsed before v0.4. */
+export function balanceStatus(st: Statement): BalanceStatus {
+  if (st.summary.balance_status) return st.summary.balance_status;
+  const t = st.transactions;
+  const none = t.filter((x) => x.balance_ok === null).length;
+  if (!t.length || none === t.length) return "no_balance";
+  if (t.some((x) => x.balance_ok === false)) return "mismatch";
+  return none ? "partial" : "verified";
+}
+
+/** Same rule as educational_date in the engine: the 1st, 2nd and 31st stay; days 3-15 -> 1st, 16-30 -> 2nd. */
+export function educationalDate(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  if (d === 1 || d === 2 || (d === 31 && d <= lastDay)) return iso;
+  return `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${d <= 15 ? "01" : "02"}`;
 }

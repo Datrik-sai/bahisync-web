@@ -10,6 +10,8 @@
   "used_ocr": false,
   "rows_total": 30,
   "rows_failed": 0,
+  "rows_no_balance": 0,
+  "balance_status": "verified",
   "balance_verified": true,
   "opening_balance": "184250.00",
   "closing_balance": "284688.10",
@@ -64,6 +66,7 @@
    "instrument_no": "N091260012345",
    "voucher_type": "Receipt",
    "note": "",
+   "review_state": "",
    "flags": []
   },
   {
@@ -89,6 +92,7 @@
    "instrument_no": "000412",
    "voucher_type": "Payment",
    "note": "",
+   "review_state": "",
    "flags": []
   },
   {
@@ -114,6 +118,7 @@
    "instrument_no": "409312345671",
    "voucher_type": "Payment",
    "note": "",
+   "review_state": "",
    "flags": [
     "one_off",
     "needs_review"
@@ -142,6 +147,7 @@
    "instrument_no": "210938",
    "voucher_type": "Payment",
    "note": "",
+   "review_state": "",
    "flags": []
   },
   {
@@ -167,6 +173,7 @@
    "instrument_no": "551203",
    "voucher_type": "Contra",
    "note": "",
+   "review_state": "",
    "flags": []
   },
   {
@@ -192,6 +199,7 @@
    "instrument_no": "409612345672",
    "voucher_type": "Receipt",
    "note": "",
+   "review_state": "",
    "flags": [
     "one_off",
     "needs_review"
@@ -220,6 +228,7 @@
    "instrument_no": "600123",
    "voucher_type": "Payment",
    "note": "",
+   "review_state": "",
    "flags": []
   },
   {
@@ -245,6 +254,7 @@
    "instrument_no": "000000",
    "voucher_type": "Payment",
    "note": "",
+   "review_state": "",
    "flags": []
   },
   {
@@ -270,6 +280,7 @@
    "instrument_no": "409812345673",
    "voucher_type": "Payment",
    "note": "",
+   "review_state": "",
    "flags": [
     "one_off",
     "small_merchant",
@@ -299,6 +310,7 @@
    "instrument_no": "000915",
    "voucher_type": "Contra",
    "note": "",
+   "review_state": "",
    "flags": []
   },
   {
@@ -324,6 +336,7 @@
    "instrument_no": "981203",
    "voucher_type": "Payment",
    "note": "",
+   "review_state": "",
    "flags": []
   },
   {
@@ -349,6 +362,7 @@
    "instrument_no": "N101260054321",
    "voucher_type": "Receipt",
    "note": "",
+   "review_state": "",
    "flags": []
   },
   {
@@ -374,6 +388,7 @@
    "instrument_no": "771204",
    "voucher_type": "Payment",
    "note": "",
+   "review_state": "",
    "flags": []
   },
   {
@@ -399,6 +414,7 @@
    "instrument_no": "410312345674",
    "voucher_type": "Payment",
    "note": "",
+   "review_state": "",
    "flags": [
     "one_off",
     "needs_review"
@@ -427,6 +443,7 @@
    "instrument_no": "556677",
    "voucher_type": "Payment",
    "note": "",
+   "review_state": "",
    "flags": []
   },
   {
@@ -452,6 +469,7 @@
    "instrument_no": "281115",
    "voucher_type": "Payment",
    "note": "",
+   "review_state": "",
    "flags": []
   },
   {
@@ -477,6 +495,7 @@
    "instrument_no": "000000",
    "voucher_type": "Receipt",
    "note": "",
+   "review_state": "",
    "flags": []
   },
   {
@@ -502,6 +521,7 @@
    "instrument_no": "884120",
    "voucher_type": "Payment",
    "note": "",
+   "review_state": "",
    "flags": [
     "suspense",
     "needs_review"
@@ -530,6 +550,7 @@
    "instrument_no": "410812345675",
    "voucher_type": "Receipt",
    "note": "",
+   "review_state": "",
    "flags": [
     "one_off",
     "needs_review"
@@ -558,6 +579,7 @@
    "instrument_no": "190426",
    "voucher_type": "Payment",
    "note": "",
+   "review_state": "",
    "flags": []
   },
   {
@@ -583,6 +605,7 @@
    "instrument_no": "411012345676",
    "voucher_type": "Payment",
    "note": "",
+   "review_state": "",
    "flags": [
     "one_off",
     "small_merchant",
@@ -612,6 +635,7 @@
    "instrument_no": "N211260012399",
    "voucher_type": "Receipt",
    "note": "",
+   "review_state": "",
    "flags": []
   },
   {
@@ -637,6 +661,7 @@
    "instrument_no": "503262",
    "voucher_type": "Payment",
    "note": "",
+   "review_state": "",
    "flags": [
     "one_off",
     "needs_review"
@@ -665,6 +690,7 @@
    "instrument_no": "771200",
    "voucher_type": "Receipt",
    "note": "",
+   "review_state": "",
    "flags": [
     "suspense",
     "needs_review"
@@ -693,6 +719,7 @@
    "instrument_no": "411412345677",
    "voucher_type": "Payment",
    "note": "",
+   "review_state": "",
    "flags": [
     "one_off",
     "needs_review"
@@ -721,6 +748,7 @@
    "instrument_no": "000000",
    "voucher_type": "Payment",
    "note": "",
+   "review_state": "",
    "flags": []
   },
   {
@@ -746,6 +774,7 @@
    "instrument_no": "002611",
    "voucher_type": "Contra",
    "note": "",
+   "review_state": "",
    "flags": []
   },
   {
@@ -771,6 +800,7 @@
    "instrument_no": "000000",
    "voucher_type": "Payment",
    "note": "",
+   "review_state": "",
    "flags": []
   },
   {
@@ -796,6 +826,7 @@
    "instrument_no": "N281260054388",
    "voucher_type": "Receipt",
    "note": "",
+   "review_state": "",
    "flags": []
   },
   {
@@ -821,6 +852,7 @@
    "instrument_no": "556012",
    "voucher_type": "Payment",
    "note": "",
+   "review_state": "",
    "flags": [
     "suspense",
     "needs_review"

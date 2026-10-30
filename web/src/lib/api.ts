@@ -20,6 +20,8 @@ export type Txn = {
   instrument_no?: string;
   voucher_type: string;
   note?: string;
+  /** Accountant's decision: "approved" keeps the row as is; "excluded" leaves it out of the Tally vouchers. */
+  review_state?: "" | "approved" | "excluded";
   flags: string[];
 };
 
@@ -30,6 +32,9 @@ export type Summary = {
   used_ocr: boolean;
   rows_total: number;
   rows_failed: number;
+  /** Missing on statements parsed before v0.4. */
+  rows_no_balance?: number;
+  balance_status?: "verified" | "mismatch" | "partial" | "no_balance";
   balance_verified: boolean;
   opening_balance: string | null;
   closing_balance: string | null;
@@ -119,12 +124,17 @@ export async function getLedgers(): Promise<{ ledgers: LedgerOption[]; groups: s
   return json(await fetch("/api/ledgers"));
 }
 
-export async function joinWaitlist(email: string, role: string, statements: string): Promise<void> {
+export async function joinWaitlist(
+  email: string,
+  role: string,
+  statements: string,
+  extra: { banks?: string; tally_version?: string } = {},
+): Promise<void> {
   await json(
     await fetch("/api/waitlist", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email, role, statements_per_month: statements }),
+      body: JSON.stringify({ email, role, statements_per_month: statements, ...extra }),
     }),
   );
 }
@@ -132,12 +142,12 @@ export async function joinWaitlist(email: string, role: string, statements: stri
 /** Build an export on the server from the browser's copy and save it as a file. */
 export async function downloadExport(
   statement: Statement,
-  kind: "excel" | "ledgers" | "vouchers",
+  kind: "excel" | "ledgers" | "vouchers" | "package",
   company: string,
   bankLedger: string,
   opts: { educationalMode?: boolean; existingLedgers?: string[] } = {},
 ): Promise<void> {
-  const url = kind === "excel" ? "/api/export/excel" : `/api/export/tally/${kind}`;
+  const url = kind === "excel" ? "/api/export/excel" : kind === "package" ? "/api/export/package" : `/api/export/tally/${kind}`;
   const res = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -152,7 +162,8 @@ export async function downloadExport(
   if (!res.ok) throw await errorFrom(res);
   const blob = await res.blob();
   const match = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "");
-  const name = match?.[1] ?? (kind === "excel" ? "statement.xlsx" : `statement_tally_${kind}.xml`);
+  const fallback = { excel: "statement.xlsx", package: "statement_bahisync.zip", ledgers: "statement_tally_ledgers.xml", vouchers: "statement_tally_vouchers.xml" };
+  const name = match?.[1] ?? fallback[kind];
   const href = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = href;

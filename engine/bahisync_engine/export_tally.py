@@ -99,14 +99,14 @@ def educational_date(d: date) -> date:
 
 
 def build_vouchers_xml(txns: list[Transaction], company: str, bank_ledger: str, educational_mode: bool = False) -> bytes:
-    """Rows with a blank ledger or zero amount are skipped.
+    """Rows with a blank ledger, zero amount or review_state "excluded" are skipped.
 
     educational_mode remaps dates for TallyPrime Educational mode and keeps the
     real date at the start of the narration.
     """
     env, data = _envelope(company, "Vouchers")
     for t in txns:
-        if not t.ledger or not t.amount:
+        if not t.ledger or not t.amount or t.review_state == "excluded":
             continue
         vtype = t.voucher_type or ("Receipt" if t.direction == "credit" else "Payment")
         vdate_d = educational_date(t.txn_date) if educational_mode else t.txn_date

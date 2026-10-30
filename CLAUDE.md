@@ -34,6 +34,8 @@ verified against the running balance; that check is the product's promise.
 5. The server is stateless: the PDF is parsed in memory and nothing is written anywhere server-side.
    Statements live in the user's browser for 24 hours.
 6. Never auto-post to Tally without the review step. Rows that fail the balance check stay flagged.
+   A ledger choice never changes other rows silently: similar rows are previewed and confirmed.
+   Rows with `review_state == "excluded"` are skipped in the vouchers XML; a new ledger clears `review_state`.
 7. Tally group names must be TallyPrime's predefined groups (see `TALLY_GROUPS` in `engine/service/app.py`
    and the same list in `web/src/lib/applyChoiceClient.ts`).
 8. After changing the ledger engine, regenerate the demo: `cd engine && python -m tests.fixtures.make_sample`.

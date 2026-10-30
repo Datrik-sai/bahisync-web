@@ -50,6 +50,9 @@ class Transaction:
     instrument_no: str = ""  # UPI RRN / NEFT-IMPS UTR / cheque number
     voucher_type: str = ""  # Payment | Receipt | Contra
     note: str = ""  # accountant's or client's note, added to the Tally narration
+    # Accountant's decision on a row: "" (none), "approved" (keep as is, e.g. Suspense on purpose)
+    # or "excluded" (leave out of the Tally vouchers; the bank balance will no longer tie in Tally).
+    review_state: str = ""
     flags: list[str] = field(default_factory=list)
 
     @property
@@ -90,6 +93,19 @@ class ParseResult:
         return sum(1 for t in self.transactions if t.balance_ok is False)
 
     @property
+    def rows_no_balance(self) -> int:
+        return sum(1 for t in self.transactions if t.balance_ok is None)
+
+    @property
+    def balance_status(self) -> str:
+        """verified | mismatch | partial (some rows had no balance to check) | no_balance."""
+        if not self.transactions or self.rows_no_balance == self.rows_total:
+            return "no_balance"
+        if self.rows_failed:
+            return "mismatch"
+        return "partial" if self.rows_no_balance else "verified"
+
+    @property
     def balance_verified(self) -> bool:
         """True only when every row has a balance and every running balance ties."""
         return bool(self.transactions) and all(t.balance_ok for t in self.transactions)
@@ -113,6 +129,8 @@ class ParseResult:
             "used_ocr": self.used_ocr,
             "rows_total": self.rows_total,
             "rows_failed": self.rows_failed,
+            "rows_no_balance": self.rows_no_balance,
+            "balance_status": self.balance_status,
             "balance_verified": self.balance_verified,
             "opening_balance": fmt(self.opening_balance),
             "closing_balance": fmt(self.closing_balance),
