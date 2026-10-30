@@ -6,7 +6,18 @@ import { useEffect, useRef, useState } from "react";
 
 import { SiteHeader } from "@/components/Wordmark";
 import { ApiError, MAX_UPLOAD_MB as MAX_MB, clientIdFor, parseStatement } from "@/lib/api";
-import { clientRules, lastClient, recentStatements, saveStatement, setLastClient, type Recent } from "@/lib/recent";
+import { PrivacyNote } from "@/components/PrivacyNote";
+import {
+  clientRules,
+  lastClient,
+  overlapWarnings,
+  recentStatements,
+  recordHistory,
+  rememberClient,
+  saveStatement,
+  setLastClient,
+  type Recent,
+} from "@/lib/recent";
 
 export default function UploadPage() {
   const router = useRouter();
@@ -59,8 +70,11 @@ export default function UploadPage() {
     setError("");
     try {
       const clientId = clientIdFor(client);
-      const st = await parseStatement(file, clientRules(clientId), password || undefined);
+      const parsed = await parseStatement(file, clientRules(clientId), password || undefined);
+      const st = { ...parsed, upload_warnings: overlapWarnings(clientId, parsed) };
       setLastClient(client.trim());
+      rememberClient(clientId, client.trim());
+      recordHistory(clientId, st);
       if (!saveStatement({ statement: st, client: client.trim(), clientId })) {
         setError("Your browser's storage is full or blocked, so the statement can't be kept for review. Clear old site data or leave private mode.");
         setBusy(false);
@@ -104,7 +118,12 @@ export default function UploadPage() {
               className="rounded-md border border-rule-strong bg-sheet px-3 py-2.5"
               autoComplete="organization"
             />
-            <span className="text-sm text-ink-faint">Ledger choices you make are remembered for this client next month.</span>
+            <span className="text-sm text-ink-faint">
+              Ledger choices you make are remembered for this client next month.{" "}
+              <Link href="/app/clients" className="font-semibold text-ink-soft underline underline-offset-4">
+                Clients & rules
+              </Link>
+            </span>
           </label>
 
           <div
@@ -173,8 +192,8 @@ export default function UploadPage() {
             <button type="submit" disabled={busy} className="rounded-md bg-ink px-6 py-3 font-semibold text-white hover:bg-[#121c40] disabled:opacity-60">
               {busy ? "Reading and checking rows…" : "Convert statement"}
             </button>
-            <span className="text-sm text-ink-faint">The PDF is read in memory and discarded. Reviewed rows stay only in this browser, for 24 hours.</span>
           </div>
+          <PrivacyNote />
         </form>
 
         {recent.length > 0 && (

@@ -7,14 +7,17 @@ import { SiteHeader, Wordmark } from "@/components/Wordmark";
 const STEPS = [
   {
     title: "Upload the PDF",
-    body: "Any Indian bank's statement PDF, including password-protected ones. Scanned and image-only PDFs are read with OCR, so check their flagged rows.",
+    body: "A statement PDF with a column header (Date, Narration, Debit, Credit, Balance), including password-protected ones. Scanned PDFs are read with OCR, so check their flagged rows.",
   },
   { title: "Every row is checked", body: "Each row is added to the previous balance. If it doesn't land on the printed balance, it's flagged." },
   {
     title: "Review only what's flagged",
     body: "Ledgers come from your past choices for that client and your existing Tally masters. Unclear rows go to the client on WhatsApp in one message.",
   },
-  { title: "Import into Tally", body: "Download ledger masters and vouchers as XML, or an Excel sheet if you prefer." },
+  {
+    title: "Import into Tally",
+    body: "A short checklist, then one ZIP: ledger masters and vouchers XML, an Excel sheet and a step-by-step import guide.",
+  },
 ];
 
 export default function Home() {
@@ -31,12 +34,13 @@ export default function Home() {
               Upload a statement and BahiSync reads every row, proves it against the running balance, and suggests
               ledgers from the choices you made last month. You get a file Tally imports directly.
             </p>
+            <p className="mt-3 text-sm text-ink-faint">The sample is a fictional client's 30-row HDFC statement: no upload, no sign-up.</p>
             <div className="mt-8 flex flex-wrap gap-3">
-              <Link href="/app" className="rounded-md bg-ink px-5 py-3 font-semibold text-white hover:bg-[#121c40]">
-                Convert a statement
+              <Link href="/app/review/sample-hdfc" className="rounded-md bg-ink px-5 py-3 font-semibold text-white hover:bg-[#121c40]">
+                See a sample statement →
               </Link>
-              <Link href="/app/review/sample-hdfc" className="rounded-md border border-ledger bg-ok-bg px-5 py-3 font-semibold text-ok hover:border-ok">
-                Try instant HDFC sample statement →
+              <Link href="/app" className="rounded-md border border-ink/30 bg-sheet px-5 py-3 font-semibold text-ink hover:border-ink">
+                Upload your own PDF
               </Link>
               <a href="#waitlist" className="px-2 py-3 font-semibold text-ink underline underline-offset-4">
                 Join the waitlist
@@ -91,14 +95,43 @@ export default function Home() {
           </div>
         </section>
 
+        <section id="banks" className="mx-auto max-w-6xl px-5 pb-16 sm:px-8">
+          <h2 className="text-2xl font-[720] tracking-[-0.02em] sm:text-3xl">Banks tested so far</h2>
+          <p className="mt-3 max-w-2xl leading-relaxed text-ink-soft">
+            BahiSync reads the column header rather than using a template per bank, so other layouts often work too. This is what we have actually
+            checked. If your bank isn't here, try the PDF: rows that don't tie are flagged, never hidden.
+          </p>
+          <div className="mt-8 grid gap-6 md:grid-cols-2 md:items-start">
+            <div className="rounded-lg border border-ledger bg-sheet p-5">
+              <h3 className="font-[680]">Real statements, fully balanced</h3>
+              <ul className="mt-3 grid gap-2 text-ink-soft">
+                <li><span className="font-semibold text-ink">State Bank of India</span>: net-banking PDF, 200+ rows</li>
+                <li><span className="font-semibold text-ink">ICICI Bank</span>: net-banking transaction history</li>
+                <li><span className="font-semibold text-ink">IndusInd Bank</span>: account statement PDF</li>
+                <li><span className="font-semibold text-ink">HSBC India</span>: scanned e-statement, read with OCR</li>
+              </ul>
+            </div>
+            <div className="rounded-lg border border-rule-strong bg-sheet p-5">
+              <h3 className="font-[680]">Synthetic layouts in our test suite</h3>
+              <ul className="mt-3 grid gap-2 text-ink-soft">
+                <li><span className="font-semibold text-ink">HDFC Bank, Axis Bank, Kotak Mahindra Bank</span>: modelled on their PDF layouts</li>
+                <li><span className="font-semibold text-ink">Regional rural (gramin) banks</span>: long statements with page totals and carried-forward lines</li>
+                <li><span className="font-semibold text-ink">Single Amount + Dr/Cr columns</span>, newest-first order, password-protected PDFs</li>
+              </ul>
+              <p className="mt-3 text-sm text-ink-faint">Synthetic means generated to match the layout, not a customer's statement.</p>
+            </div>
+          </div>
+        </section>
+
         <section id="data" className="border-y border-rule-strong bg-sheet">
           <div className="mx-auto max-w-6xl px-5 py-16 sm:px-8">
             <h2 className="text-2xl font-[720] tracking-[-0.02em] sm:text-3xl">Your clients' data</h2>
             <ul className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
               <li>
-                <h3 className="font-[680]">Stateless server</h3>
+                <h3 className="font-[680]">Read in memory, then discarded</h3>
                 <p className="mt-1.5 leading-relaxed text-ink-soft">
-                  Your PDF is parsed in memory and discarded straight away. There is no database of statements on our side.
+                  The PDF goes over HTTPS to our server (Vercel, Mumbai region), is read in memory, including OCR for scans, and is discarded. No
+                  outside OCR or AI service sees it, and there is no database of statements.
                 </p>
               </li>
               <li>
@@ -114,7 +147,8 @@ export default function Home() {
               <li>
                 <h3 className="font-[680]">Your ledger choices stay with you</h3>
                 <p className="mt-1.5 leading-relaxed text-ink-soft">
-                  Counterparty-to-ledger choices and loaded Tally masters are saved per client in your browser, so next month is faster.
+                  Counterparty-to-ledger choices and loaded Tally masters are saved per client in your browser, so next month is faster. View, export,
+                  import or delete them under Clients & rules.
                 </p>
               </li>
             </ul>

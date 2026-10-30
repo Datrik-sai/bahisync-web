@@ -6,10 +6,11 @@ export const runtime = "nodejs";
 
 const ROLES = ["CA / accounting firm", "Accountant at a business", "Business owner", "Tax practitioner"];
 const VOLUMES = ["1–10", "10–50", "50–200", "200+"];
+const TALLY = ["TallyPrime (latest)", "TallyPrime (older release)", "Tally.ERP 9", "Not using Tally yet"];
 
 /** Waitlist sign-ups: one private JSON blob per entry on Vercel; a local file in development. */
 export async function POST(request: Request) {
-  let body: { email?: unknown; role?: unknown; statements_per_month?: unknown };
+  let body: { email?: unknown; role?: unknown; statements_per_month?: unknown; banks?: unknown; tally_version?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -23,6 +24,9 @@ export async function POST(request: Request) {
     email,
     role: ROLES.includes(String(body.role)) ? String(body.role) : "",
     statements_per_month: VOLUMES.includes(String(body.statements_per_month)) ? String(body.statements_per_month) : "",
+    // Free text, e.g. "SBI, HDFC, Karur Vysya": tells us which layouts to test next.
+    banks: String(body.banks ?? "").replace(/[\u0000-\u001f]/g, " ").trim().slice(0, 200),
+    tally_version: TALLY.includes(String(body.tally_version)) ? String(body.tally_version) : "",
     at: new Date().toISOString(),
   };
 

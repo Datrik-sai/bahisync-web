@@ -23,6 +23,10 @@ verified against the running balance; that check is the product's promise.
     call. It mirrors `apply_user_choice` and `/api/rows/apply`: change both together.
   - `web/src/lib/tallyMasters.ts` reads a client's Tally masters XML in the browser (UTF-16 aware).
   - `web/src/lib/whatsapp.ts` builds the "ask the client" message and parses their reply.
+  - `web/src/lib/recent.ts` holds all browser storage: statements (24 h), per-client rules, Tally masters,
+    upload history (row hashes only) for the duplicate check, and the client list behind `/app/clients`.
+  - `web/src/components/PrivacyNote.tsx` is the privacy promise shown in the app. Keep it true; update it
+    whenever where the PDF goes or who sees it changes.
   The browser calls `/api/*`, which `next.config.ts` rewrites to the engine, except `/api/waitlist`,
   a Next.js route handler that writes to Vercel Blob (private).
 

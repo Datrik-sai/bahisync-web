@@ -54,6 +54,8 @@ export type Statement = {
   sample?: boolean;
   client?: string;
   client_rules?: ClientRules;
+  /** Added in the browser at upload: overlaps with this client's earlier statements. */
+  upload_warnings?: string[];
 };
 
 /** direction:counterparty-key -> [ledger, group], remembered per client in the browser. */
@@ -118,6 +120,10 @@ export async function applyLedger(
       body: JSON.stringify({ statement, row_no: rowNo, ledger, group, apply_to_similar: applyToSimilar, client_rules: rules }),
     }),
   );
+}
+
+export async function getHealth(): Promise<{ ok: boolean; ai_enabled: boolean; ocr_enabled: boolean }> {
+  return json(await fetch("/api/health"));
 }
 
 export async function getLedgers(): Promise<{ ledgers: LedgerOption[]; groups: string[] }> {

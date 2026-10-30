@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { PrivacyNote } from "@/components/PrivacyNote";
 import { SiteHeader } from "@/components/Wordmark";
 import { downloadExport, formatDate, getLedgers, money, moneyAlways, type ClientRules, type LedgerOption, type Statement, type Txn } from "@/lib/api";
 import {
@@ -378,6 +379,16 @@ export function ReviewScreen({ id }: { id: string }) {
           <Stat label="Closing balance" value={moneyAlways(s.closing_balance)} />
         </dl>
 
+        {(st.upload_warnings ?? []).length > 0 && (
+          <div role="alert" className="mt-4 rounded-lg border border-mismatch bg-mismatch-bg px-4 py-3 text-sm text-mismatch">
+            <p className="font-semibold">Possible duplicate upload</p>
+            <ul className="mt-1 grid gap-1">
+              {(st.upload_warnings ?? []).map((w) => (
+                <li key={w}>{w}</li>
+              ))}
+            </ul>
+          </div>
+        )}
         {s.warnings.length > 0 && (
           <ul className="mt-4 grid gap-1 text-sm text-review">
             {s.warnings.map((w) => (
@@ -616,10 +627,7 @@ export function ReviewScreen({ id }: { id: string }) {
             <p className="mt-2 min-h-5 text-sm text-mismatch" aria-live="polite">{exportError}</p>
 
             <div className="mt-6 grid gap-2 border-t border-rule pt-4 text-sm text-ink-soft">
-              <p>
-                <span className="font-semibold text-ink">Nothing is stored on our servers.</span> The PDF was read in memory and discarded.
-              </p>
-              <p>These rows are kept only in this browser, for 24 hours, so a refresh doesn't lose your work.</p>
+              <PrivacyNote compact />
               <div className="flex flex-wrap gap-x-4 gap-y-1">
                 <button onClick={removeNow} className="font-semibold text-mismatch underline underline-offset-4">Delete this statement</button>
                 <button onClick={wipeAll} className="font-semibold text-mismatch underline underline-offset-4">Wipe browser data now</button>

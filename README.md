@@ -24,8 +24,12 @@ Bank statement PDF → TallyPrime vouchers, with every row checked against the r
   (e.g. "Keep in Suspense") or left out of the vouchers, with a warning that Tally's balance will differ.
 - **Exports:** one ZIP (ledger masters XML, vouchers XML, Excel and a HOW-TO-IMPORT guide) behind a
   pre-export checklist; separate files are still available.
-- **Privacy:** the server is stateless. PDFs are processed in memory; the extracted rows and remembered
-  ledgers live only in the user's browser (statements cleared after 24 hours).
+- **Privacy:** the server is stateless. PDFs go over HTTPS to the API (Vercel, bom1), are read in memory,
+  including OCR, and discarded; the extracted rows and remembered ledgers live only in the user's browser
+  (statements cleared after 24 hours). The on-screen privacy note reads `ai_enabled` from `/api/health`.
+- **Clients & rules** (`/app/clients`): view, remove, export and import each client's remembered rules,
+  delete a client. Each upload is recorded per client (period + row hashes, no text), and a second upload
+  covering the same rows of the same account is flagged as a possible duplicate.
 - **Long statements:** repeated headers, Page Total, Carried / Brought Forward and dated summary rows are
   skipped; the opening balance is derived from row 1 when it isn't printed. Regional rural banks are
   detected by name, not by their sponsor bank's IFSC.
@@ -38,7 +42,8 @@ Bank statement PDF → TallyPrime vouchers, with every row checked against the r
 - **TallyPrime Educational mode** export option (dates moved to the 1st / 2nd, real date kept in the narration),
   turned on only after previewing every date change.
 - **Sample statement** at `/app/review/sample-hdfc`, no upload needed.
-- **Landing page + waitlist** for the validation phase.
+- **Landing page + waitlist** for the validation phase: sample-first, an honest "banks tested" list, and
+  the waitlist asks which banks clients use and their Tally version.
 
 ## Run it
 
