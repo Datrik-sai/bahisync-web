@@ -49,13 +49,25 @@ Bank statement PDF → TallyPrime vouchers, with every row checked against the r
 - **Landing page + waitlist** for the validation phase: sample-first, an honest "banks tested" list, and
   the waitlist asks which banks clients use and their Tally version.
 
+## Phase 2 (TallyPrime QA) — on branch `phase2-tally-fixes`, awaiting TallyPrime tests
+
+- Printed opening / closing / totals are compared with the rows; a printed opening disagreeing with
+  row 1 flags the statement (`summary.py`).
+- Rows after a missing balance are checked against the carried balance (`balance.py`).
+- The bank ledger's opening balance is exported only after the accountant confirms the statement
+  starts the books (`opening.py`, export panel); otherwise the guide says what Tally should already show.
+- Every voucher has a deterministic REMOTEID (`voucher_ids.py`).
+- HOW-TO-IMPORT.txt lists what Tally should show afterwards: counts by type, per-date totals, closing.
+- `python -m tests.fixtures.make_tally_kit` builds the TallyPrime test kit. The opening sign and
+  REMOTEID re-import behaviour are NOT verified until it passes.
+
 ## Run it
 
 ```bash
 # Engine + API
 cd engine
 pip install -r requirements-dev.txt     # also needs tesseract-ocr and poppler-utils for scans
-python -m pytest -q                     # 69 tests
+python -m pytest -q                     # 102 tests
 uvicorn service.app:app --reload --port 8000
 
 # Web (new terminal)

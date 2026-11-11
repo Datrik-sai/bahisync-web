@@ -20,6 +20,7 @@ from decimal import Decimal
 
 from .layout import _cells, group_lines
 from .models import ParseResult
+from .opening import inr
 from .pdf_io import PageWords
 from .values import parse_amount, parse_date
 
@@ -134,7 +135,7 @@ def reconcile(result: ParseResult, printed: PrintedSummary, derived_opening: Dec
         ok = abs(printed_v - computed) <= TOLERANCE
         return {"check": name, "label": label, "printed": fmt(printed_v), "computed": fmt(computed),
                 "status": "ok" if ok else "mismatch",
-                "note": "" if ok else f"Printed {printed_v:.2f} but the rows give {computed:.2f} (difference {printed_v - computed:.2f})."}
+                "note": "" if ok else f"Printed {inr(printed_v)} but the rows give {inr(computed)} (difference {'-' if printed_v < computed else ''}{inr(printed_v - computed)})."}
 
     txns = result.transactions
     checks: list[dict] = []
@@ -142,8 +143,10 @@ def reconcile(result: ParseResult, printed: PrintedSummary, derived_opening: Dec
         "opening", "Opening balance", printed.opening, derived_opening,
         "Not printed: worked out from row 1 (its balance minus its amount), so row 1 can't be checked independently.",
     ))
-    opening_used = result.opening_balance
-    computed_closing = (opening_used + result.total_credit - result.total_debit) if opening_used is not None and txns else None
+    # Closing is checked on the rows alone (row 1's balance worked back, plus the
+    # movement), so a wrong printed opening is reported once, as the opening.
+    base = derived_opening if derived_opening is not None else result.opening_balance
+    computed_closing = (base + result.total_credit - result.total_debit) if base is not None and txns else None
     checks.append(compare("closing", "Closing balance", printed.closing, computed_closing,
                           "No closing balance printed to compare with."))
     checks.append(compare("total_debit", "Total debits", printed.total_debit, result.total_debit if txns else None,

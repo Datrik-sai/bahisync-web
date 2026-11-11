@@ -366,3 +366,12 @@ def test_tally_kit_files_are_consistent(tmp_path, monkeypatch):
 
 
 BANK_KIT = "HDFC Bank XX4321"
+
+
+def test_wrong_printed_opening_is_reported_once(fixtures):
+    fx = fixtures["hdfc"]
+    t = fx.truths[0]
+    r = parse_statement(render(LAYOUTS["hdfc"], fx.truths, t.balance - t.credit + t.debit + Decimal("100")))
+    st = {c["check"]: c["status"] for c in r.reconciliation}
+    assert st["opening"] == "mismatch" and st["closing"] == "ok"
+    assert "difference 100.00" in next(c["note"] for c in r.reconciliation if c["check"] == "opening")

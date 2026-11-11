@@ -9,7 +9,14 @@ verified against the running balance; that check is the product's promise.
   - `layout.py` header-driven table parser (no per-bank code; add header synonyms to `ROLE_KEYWORDS`).
     Rows are stitched by row bands (top-aligned or centred dates), or, when amounts sit on undated
     lines (HSBC), each amount line closes a transaction dated by the latest date above it.
-  - `balance.py` running-balance verification, newest-first detection
+  - `balance.py` running-balance verification, newest-first detection; a row with no printed balance
+    carries the running balance forward so the next printed balance is still checked
+  - `summary.py` printed opening / closing / total debits / total credits outside the table, and
+    `reconcile()` (printed vs calculated). A printed opening is used instead of one derived from row 1.
+  - `opening.py` when the statement's opening may become the bank ledger's Tally opening balance
+    (accountant confirms + statement starts in the books' first month); mirrored in `web/src/lib/opening.ts`
+  - `voucher_ids.py` deterministic REMOTEID per voucher (bank reference, else date/direction/amount/
+    narration + position among identical rows). Never depends on ledger, group, type or notes.
   - `ledgers.py` ledger suggestions: client rules > default rules > AI > party guess > Suspense
   - `export_tally.py` ledger masters + vouchers XML; `export_excel.py`
   - `ai_suggest.py` optional Claude API suggestions (only when ANTHROPIC_API_KEY is set)
@@ -44,7 +51,10 @@ verified against the running balance; that check is the product's promise.
    Rows with `review_state == "excluded"` are skipped in the vouchers XML; a new ledger clears `review_state`.
 7. Tally group names must be TallyPrime's predefined groups (see `TALLY_GROUPS` in `engine/service/app.py`
    and the same list in `web/src/lib/applyChoiceClient.ts`).
-8. After changing the ledger engine, regenerate the demo: `cd engine && python -m tests.fixtures.make_sample`
+8. Don't call exports duplicate-safe, and keep `OPENING_SIGN_VERIFIED = False` in `export_tally.py`, until
+   the TallyPrime test kit (`python -m tests.fixtures.make_tally_kit`) has passed in a real, disposable
+   TallyPrime company. Code tests are not a substitute for that import.
+9. After changing the ledger engine, regenerate the demo: `cd engine && python -m tests.fixtures.make_sample`
    (writes `web/src/lib/sample-hdfc.json` and `web/public/sample-hdfc.pdf`).
 
 ## Adding support for a new bank layout
