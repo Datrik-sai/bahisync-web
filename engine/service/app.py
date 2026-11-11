@@ -30,6 +30,7 @@ from bahisync_engine import ai_suggest
 from bahisync_engine.export_excel import build_excel
 from bahisync_engine.export_tally import OPENING_SIGN_VERIFIED, build_ledger_masters_xml, build_vouchers_xml
 from bahisync_engine.opening import OpeningDecision, day_before, decide, dr_cr
+from bahisync_engine.voucher_ids import account_identity
 from bahisync_engine.ledgers import DEFAULT_RULES, SUSPENSE, ClientRules, apply_user_choice, counterparty_key, suggest
 from bahisync_engine.parser import parse_statement
 from bahisync_engine.pdf_io import PasswordRequired, ScannedUnsupported, UnreadablePDF, ocr_available
@@ -228,6 +229,11 @@ def _masters_xml(body: "ExportRequest", result, opening: OpeningDecision | None 
     return build_ledger_masters_xml(body.company.strip(), body.bank_ledger.strip(), groups, used, existing, opening.export)
 
 
+def _vouchers_xml(body: "ExportRequest", result) -> bytes:
+    account = account_identity(result.bank, result.account_hint, body.bank_ledger)
+    return build_vouchers_xml(result.transactions, body.company.strip(), body.bank_ledger.strip(), body.educational_mode, account)
+
+
 def _require_names(body: "ExportRequest") -> None:
     if not body.company.strip() or not body.bank_ledger.strip():
         raise HTTPException(400, "Company and bank ledger names are required.")
@@ -242,7 +248,7 @@ def export_tally(kind: str, body: ExportRequest) -> Response:
     if kind == "ledgers":
         xml = _masters_xml(body, result)
     else:
-        xml = build_vouchers_xml(result.transactions, body.company.strip(), body.bank_ledger.strip(), body.educational_mode)
+        xml = _vouchers_xml(body, result)
     return Response(
         xml,
         media_type="application/xml",
@@ -346,7 +352,7 @@ def export_package(body: ExportRequest) -> Response:
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr(f"{stem}_tally_ledgers.xml", _masters_xml(body, result, opening))
         z.writestr(f"{stem}_tally_vouchers.xml",
-                   build_vouchers_xml(result.transactions, body.company.strip(), body.bank_ledger.strip(), body.educational_mode))
+                   _vouchers_xml(body, result))
         z.writestr(f"{stem}.xlsx", build_excel(result))
         z.writestr("HOW-TO-IMPORT.txt", import_guide(body, result, stem, opening))
     return Response(

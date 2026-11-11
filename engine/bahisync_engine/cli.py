@@ -12,6 +12,7 @@ from pathlib import Path
 
 from .export_excel import build_excel
 from .export_tally import build_ledger_masters_xml, build_vouchers_xml
+from .voucher_ids import account_identity
 from .ledgers import suggest
 from .parser import parse_statement
 
@@ -34,7 +35,8 @@ def main() -> None:
     (out / f"{stem}.xlsx").write_bytes(build_excel(result))
     used = {t.ledger for t in result.transactions if t.ledger}
     (out / f"{stem}_ledgers.xml").write_bytes(build_ledger_masters_xml(args.company, bank_ledger, groups, used))
-    (out / f"{stem}_vouchers.xml").write_bytes(build_vouchers_xml(result.transactions, args.company, bank_ledger))
+    (out / f"{stem}_vouchers.xml").write_bytes(build_vouchers_xml(
+        result.transactions, args.company, bank_ledger, account=account_identity(result.bank, result.account_hint, bank_ledger)))
     print(json.dumps(result.summary(), indent=2))
 
 

@@ -222,3 +222,86 @@ def test_decide_statuses():
     assert decide(r, True, date(2026, 4, 1), True).status == "bank_in_tally"
     r.opening_balance = None
     assert decide(r, True, date(2026, 4, 1), False).status == "unknown"
+
+
+# ------------------------------------------------- step 4: voucher identifiers
+
+from dataclasses import replace
+
+from bahisync_engine.export_tally import build_vouchers_xml
+from bahisync_engine.voucher_ids import account_identity, usable_reference, voucher_ids
+
+ACC = account_identity("HDFC Bank", "XX4321", "HDFC Bank XX4321")
+
+
+def _ids_from_xml(xml: bytes) -> list[str]:
+    return [v.get("REMOTEID") for v in ET.fromstring(xml).iter("VOUCHER")]
+
+
+def test_reference_quality():
+    assert usable_reference("409312345671") == "409312345671"
+    assert usable_reference("N091260012345") == "N091260012345"
+    assert usable_reference("000000") is None and usable_reference("12") is None and usable_reference("") is None
+
+
+def test_two_identical_same_day_payments_get_different_ids():
+    a = _t(1, 5, debit="500.00", narration="CASH WDL ATM", bal="9500")
+    b = _t(2, 5, debit="500.00", narration="CASH WDL ATM", bal="9000")
+    ids = voucher_ids([a, b], ACC)
+    assert ids[1] != ids[2]
+
+
+def test_ids_ignore_ledger_voucher_type_note_and_review():
+    rows = [_t(1, 2, debit="28000", narration="RENT APRIL", ref="000412", bal="1")]
+    before = voucher_ids(rows, ACC)
+    changed = [replace(rows[0], ledger="Rent", group="Indirect Expenses", voucher_type="Payment", note="shop 14", review_state="approved")]
+    assert voucher_ids(changed, ACC) == before
+
+
+def test_reference_rows_ignore_narration_changes_fallback_rows_do_not():
+    ref_row = _t(1, 3, debit="1500", narration="UPI/DR/409312345671/RAJESH", ref="409312345671")
+    assert voucher_ids([ref_row], ACC) == voucher_ids([replace(ref_row, narration="UPI-409312345671-RAJESH KUMAR")], ACC)
+    txt_row = _t(1, 8, debit="17.70", narration="SMS CHARGES QTR ENDED MAR", ref="000000")
+    # Spacing and punctuation don't matter; different words do.
+    assert voucher_ids([txt_row], ACC) == voucher_ids([replace(txt_row, narration="SMS  CHARGES QTR-ENDED MAR")], ACC)
+    assert voucher_ids([txt_row], ACC) != voucher_ids([replace(txt_row, narration="SMS CHARGES QTR ENDED JUN")], ACC)
+
+
+def test_overlapping_statement_gives_the_same_ids():
+    st = _sample()
+    full = statement_from_json(st)
+    later = [replace(t, row_no=i) for i, t in enumerate(full.transactions[17:], start=1)]  # starts 17-Apr
+    full_ids = voucher_ids(full.transactions, ACC)
+    later_ids = voucher_ids(later, ACC)
+    assert [full_ids[t.row_no] for t in full.transactions[17:]] == list(later_ids.values())
+
+
+def test_excluded_row_does_not_shift_other_ids():
+    full = statement_from_json(_sample()).transactions
+    plain = _ids_from_xml(build_vouchers_xml(full, "Co", "HDFC Bank XX4321", account=ACC))
+    left_out = [replace(t, review_state="excluded") if t.row_no == 5 else t for t in full]
+    ids = _ids_from_xml(build_vouchers_xml(left_out, "Co", "HDFC Bank XX4321", account=ACC))
+    assert ids == plain[:4] + plain[5:]
+
+
+def test_sample_export_ids_are_unique_and_stable():
+    a, b = _post("tally/vouchers"), _post("tally/vouchers")
+    ids = _ids_from_xml(a.content)
+    assert len(ids) == 30 and len(set(ids)) == 30 and all(ids)
+    assert a.content == b.content  # re-exporting gives byte-identical XML
+
+
+def test_reclassifying_keeps_ids_and_changes_only_that_voucher():
+    st = _sample()
+    before = _post("tally/vouchers").content
+    for t in st["transactions"]:
+        if t["row_no"] == 18:
+            t["ledger"], t["group"] = "Miscellaneous Expenses", "Indirect Expenses"
+    after = TestClient(app).post("/api/export/tally/vouchers", json={"statement": st, "company": "BahiSync QA Test", "bank_ledger": "HDFC Bank XX4321"}).content
+    assert _ids_from_xml(before) == _ids_from_xml(after)
+    vb, va = list(ET.fromstring(before).iter("VOUCHER")), list(ET.fromstring(after).iter("VOUCHER"))
+    diff = [i for i, (x, y) in enumerate(zip(vb, va)) if ET.tostring(x) != ET.tostring(y)]
+    assert diff == [17]
+
+
+from bahisync_engine.serialize import statement_from_json  # noqa: E402

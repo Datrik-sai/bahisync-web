@@ -21,6 +21,7 @@ from decimal import Decimal
 from xml.etree import ElementTree as ET
 
 from .models import Transaction
+from .voucher_ids import voucher_ids
 
 UDF = {"xmlns:UDF": "TallyUDF"}
 
@@ -125,13 +126,24 @@ def educational_date(d: date) -> date:
     return d.replace(day=1 if d.day <= 15 else 2)
 
 
-def build_vouchers_xml(txns: list[Transaction], company: str, bank_ledger: str, educational_mode: bool = False) -> bytes:
+def build_vouchers_xml(
+    txns: list[Transaction],
+    company: str,
+    bank_ledger: str,
+    educational_mode: bool = False,
+    account: str | None = None,
+    action: str = "Create",
+) -> bytes:
     """Rows with a blank ledger, zero amount or review_state "excluded" are skipped.
 
     educational_mode remaps dates for TallyPrime Educational mode and keeps the
     real date at the start of the narration.
+
+    account (voucher_ids.account_identity) adds a deterministic REMOTEID to every
+    voucher. `action` exists for the Tally test kit; exports use "Create".
     """
     env, data = _envelope(company, "Vouchers")
+    ids = voucher_ids(txns, account) if account else {}
     for t in txns:
         if not t.ledger or not t.amount or t.review_state == "excluded":
             continue
@@ -139,7 +151,8 @@ def build_vouchers_xml(txns: list[Transaction], company: str, bank_ledger: str, 
         vdate_d = educational_date(t.txn_date) if educational_mode else t.txn_date
         vdate = vdate_d.strftime("%Y%m%d")
         msg = _sub(data, "TALLYMESSAGE", **UDF)
-        v = _sub(msg, "VOUCHER", VCHTYPE=vtype, ACTION="Create", OBJVIEW="Accounting Voucher View")
+        attrs = {"REMOTEID": ids[t.row_no]} if t.row_no in ids else {}
+        v = _sub(msg, "VOUCHER", **attrs, VCHTYPE=vtype, ACTION=action, OBJVIEW="Accounting Voucher View")
         _sub(v, "DATE", vdate)
         _sub(v, "VOUCHERTYPENAME", vtype)
         parts = []
