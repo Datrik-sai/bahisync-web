@@ -344,25 +344,45 @@ def test_tally_kit_files_are_consistent(tmp_path, monkeypatch):
 
     monkeypatch.setattr(kit, "OUT", tmp_path / "tally_kit")
     kit.build()
-    f = lambda n: (tmp_path / "tally_kit" / n).read_bytes()  # noqa: E731
+    d = tmp_path / "tally_kit"
+    f = lambda n: (d / n).read_bytes()  # noqa: E731
+    files = {p.name: p.read_bytes() for p in d.iterdir()}
+    checks = kit.verify(files, _sample())
+    assert len(checks) == 12 and all(ok for _, ok in checks), checks
 
     sign = _ledgers(f("A_sign_test_masters.xml"))
     assert [sign[n].findtext("OPENINGBALANCE") for n in ("Sign Test Dr", "Sign Test Cr", "Sign Test Zero")] == ["-184250.00", "184250.00", "0.00"]
-
-    b2 = ET.fromstring(f("B2_rent_test_vouchers_original_format.xml"))
-    rent = next(v for v in b2.iter("VOUCHER") if "RENT APRIL" in v.findtext("NARRATION"))
-    assert rent.findtext("DATE") == "20260402" and rent.get("REMOTEID") is None
-    assert b"OPENINGBALANCE" not in f("B1_rent_test_masters.xml")
-
-    assert _ledgers(f("C1_masters_with_opening.xml"))[BANK_KIT].findtext("OPENINGBALANCE") == "-184250.00"
-    c2, c4, c5, c6 = (_ids_from_xml(f(n)) for n in ("C2_vouchers.xml", "C4_vouchers_row18_reclassified.xml",
-                                                    "C5_vouchers_overlap_17_to_29_apr.xml", "C6_vouchers_two_identical_payments.xml"))
-    assert len(c2) == 30 and c4 == c2 and c5 == c2[17:]
-    assert len(set(c6)) == 2 and not set(c6) & set(c2)
-    alter = ET.fromstring(f("C7_vouchers_action_alter_ONLY_IF_C3_FAILS.xml"))
-    assert {v.get("ACTION") for v in alter.iter("VOUCHER")} == {"Alter"} and _ids_from_xml(ET.tostring(alter)) == c2
+    # Every XML file is covered by the company-name check.
+    covered = [n for n in files if n.endswith(".xml") and any(n.startswith(p) for p in
+               ("A_", "B1", "B2", "C1", "C2", "C4", "C5", "C6", "C7", "D_ignore", "D_modify", "D_combine", "E1", "E2"))]
+    assert len(covered) == sum(n.endswith(".xml") for n in files) == 18
     readme = f("README.txt").decode()
-    assert "Suspense A/c 9,350.00 Dr" in readme and "becomes 2,650.00 Cr" in readme and "2,83,688.10 Dr" in readme
+    assert "Suspense 9,350.00 Dr" in readme and "Suspense 2,650.00 Cr" in readme and "2,83,688.10 Dr" in readme
+    header = f("RESULTS.csv").decode("utf-8-sig").splitlines()[0]
+    for col in ("Created", "Altered", "Ignored", "Errors", "Vouchers before", "Vouchers after",
+                "HDFC Bank XX4321 closing after", "Suspense A/c after", "Errors / exceptions shown"):
+        assert col in header
+
+
+def test_tally_kit_checks_catch_a_broken_kit(tmp_path, monkeypatch):
+    from tests.fixtures import make_tally_kit as kit
+
+    monkeypatch.setattr(kit, "OUT", tmp_path / "tally_kit")
+    kit.build()
+    files = {p.name: p.read_bytes() for p in (tmp_path / "tally_kit").iterdir()}
+    broken = dict(files)
+    # C4 that also changes an amount; C5 missing a voucher; C6 with a repeated ID.
+    broken["C4_vouchers_row18_reclassified_create.xml"] = files["C4_vouchers_row18_reclassified_create.xml"].replace(b"28000.00", b"28001.00")
+    c5 = ET.fromstring(files["C5_vouchers_overlap_17_to_29_apr_create.xml"])
+    data = c5.find(".//REQUESTDATA")
+    data.remove(data[0])
+    broken["C5_vouchers_overlap_17_to_29_apr_create.xml"] = ET.tostring(c5)
+    ids = _ids_from_xml(files["C6_vouchers_two_identical_payments_create.xml"])
+    broken["C6_vouchers_two_identical_payments_create.xml"] = files["C6_vouchers_two_identical_payments_create.xml"].replace(ids[1].encode(), ids[0].encode())
+    failed = {name for name, ok in kit.verify(broken, _sample()) if not ok}
+    assert any(n.startswith("C4: only") for n in failed)
+    assert any(n.startswith("C5:") for n in failed)
+    assert any(n.startswith("C6:") for n in failed)
 
 
 BANK_KIT = "HDFC Bank XX4321"
