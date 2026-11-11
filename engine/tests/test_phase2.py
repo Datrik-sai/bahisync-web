@@ -334,3 +334,35 @@ def test_guide_counts_skip_left_out_rows():
     r = TestClient(app).post("/api/export/package", json={"statement": st, "company": "C", "bank_ledger": "HDFC Bank XX4321"})
     g = _zip.ZipFile(_io.BytesIO(r.content)).read("HOW-TO-IMPORT.txt").decode()
     assert "Vouchers: 29 in total, 3 Contra, 18 Payment, 8 Receipt." in g and "02-04-2026" not in g.split("Day Book")[1]
+
+
+# ------------------------------------------------- step 6: Tally test kit
+
+
+def test_tally_kit_files_are_consistent(tmp_path, monkeypatch):
+    from tests.fixtures import make_tally_kit as kit
+
+    monkeypatch.setattr(kit, "OUT", tmp_path / "tally_kit")
+    kit.build()
+    f = lambda n: (tmp_path / "tally_kit" / n).read_bytes()  # noqa: E731
+
+    sign = _ledgers(f("A_sign_test_masters.xml"))
+    assert [sign[n].findtext("OPENINGBALANCE") for n in ("Sign Test Dr", "Sign Test Cr", "Sign Test Zero")] == ["-184250.00", "184250.00", "0.00"]
+
+    b2 = ET.fromstring(f("B2_rent_test_vouchers_original_format.xml"))
+    rent = next(v for v in b2.iter("VOUCHER") if "RENT APRIL" in v.findtext("NARRATION"))
+    assert rent.findtext("DATE") == "20260402" and rent.get("REMOTEID") is None
+    assert b"OPENINGBALANCE" not in f("B1_rent_test_masters.xml")
+
+    assert _ledgers(f("C1_masters_with_opening.xml"))[BANK_KIT].findtext("OPENINGBALANCE") == "-184250.00"
+    c2, c4, c5, c6 = (_ids_from_xml(f(n)) for n in ("C2_vouchers.xml", "C4_vouchers_row18_reclassified.xml",
+                                                    "C5_vouchers_overlap_17_to_29_apr.xml", "C6_vouchers_two_identical_payments.xml"))
+    assert len(c2) == 30 and c4 == c2 and c5 == c2[17:]
+    assert len(set(c6)) == 2 and not set(c6) & set(c2)
+    alter = ET.fromstring(f("C7_vouchers_action_alter_ONLY_IF_C3_FAILS.xml"))
+    assert {v.get("ACTION") for v in alter.iter("VOUCHER")} == {"Alter"} and _ids_from_xml(ET.tostring(alter)) == c2
+    readme = f("README.txt").decode()
+    assert "Suspense A/c 9,350.00 Dr" in readme and "becomes 2,650.00 Cr" in readme and "2,83,688.10 Dr" in readme
+
+
+BANK_KIT = "HDFC Bank XX4321"

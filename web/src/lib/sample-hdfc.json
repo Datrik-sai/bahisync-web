@@ -17,6 +17,57 @@
   "closing_balance": "284688.10",
   "total_debit": "168195.90",
   "total_credit": "268634.00",
+  "opening_source": "printed",
+  "reconciliation": [
+   {
+    "check": "opening",
+    "label": "Opening balance",
+    "printed": "184250.00",
+    "computed": "184250.00",
+    "status": "ok",
+    "note": ""
+   },
+   {
+    "check": "closing",
+    "label": "Closing balance",
+    "printed": "284688.10",
+    "computed": "284688.10",
+    "status": "ok",
+    "note": ""
+   },
+   {
+    "check": "total_debit",
+    "label": "Total debits",
+    "printed": null,
+    "computed": "168195.90",
+    "status": "not_printed",
+    "note": "No debit total printed to compare with."
+   },
+   {
+    "check": "total_credit",
+    "label": "Total credits",
+    "printed": null,
+    "computed": "268634.00",
+    "status": "not_printed",
+    "note": "No credit total printed to compare with."
+   },
+   {
+    "check": "continuity",
+    "label": "Running balance",
+    "printed": null,
+    "computed": null,
+    "status": "ok",
+    "note": "Every printed balance ties to the row before it."
+   },
+   {
+    "check": "missing_balance",
+    "label": "Rows with no balance",
+    "printed": null,
+    "computed": null,
+    "status": "ok",
+    "note": "Every row has a printed balance."
+   }
+  ],
   "warnings": []
  },
  "groups": {
