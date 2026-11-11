@@ -20,10 +20,13 @@ def _check(txns: list[Transaction], opening: Decimal | None) -> int:
     failures = 0
     for t in txns:
         if t.balance is None:
+            # No printed balance: this row can't be checked, but the running
+            # balance carries on, so the next printed balance is still checked
+            # against everything before it (it no longer starts from scratch).
             t.balance_ok = None
-            t.expected_balance = None
+            t.expected_balance = prev + t.credit - t.debit if prev is not None else None
+            prev = t.expected_balance
             failures += 1
-            prev = None
             continue
         if prev is None:
             # First row with no opening balance: derive opening from this row.
