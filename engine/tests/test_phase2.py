@@ -305,3 +305,32 @@ def test_reclassifying_keeps_ids_and_changes_only_that_voucher():
 
 
 from bahisync_engine.serialize import statement_from_json  # noqa: E402
+
+
+# ------------------------------------------------- step 5: post-import checks
+
+
+def _guide(**extra) -> str:
+    return _zip.ZipFile(_io.BytesIO(_post("package", **extra).content)).read("HOW-TO-IMPORT.txt").decode()
+
+
+def test_guide_lists_counts_dates_and_closing():
+    g = _guide(opening_confirmed=True, books_begin="2026-04-01")
+    assert "Vouchers: 30 in total, 3 Contra, 19 Payment, 8 Receipt." in g
+    assert "02-04-2026    1 voucher   in           0.00  out      28,000.00" in g  # Rent
+    assert "03-04-2026    1 voucher   in           0.00  out       1,500.00" in g  # Rajesh Kumar
+    assert "closing balance after import: Rs 2,84,688.10 Dr" in g
+    assert "do NOT import the same vouchers file twice" in g
+
+
+def test_guide_without_opening_gives_movement():
+    g = _guide()
+    assert "should move by Rs 1,00,438.10 Dr" in g and "it should now show Rs 2,84,688.10 Dr" in g
+
+
+def test_guide_counts_skip_left_out_rows():
+    st = _sample()
+    st["transactions"][1]["review_state"] = "excluded"  # Rent
+    r = TestClient(app).post("/api/export/package", json={"statement": st, "company": "C", "bank_ledger": "HDFC Bank XX4321"})
+    g = _zip.ZipFile(_io.BytesIO(r.content)).read("HOW-TO-IMPORT.txt").decode()
+    assert "Vouchers: 29 in total, 3 Contra, 18 Payment, 8 Receipt." in g and "02-04-2026" not in g.split("Day Book")[1]

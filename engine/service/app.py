@@ -20,6 +20,7 @@ import secrets
 import time
 import zipfile
 from datetime import date
+from decimal import Decimal
 from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException
@@ -29,7 +30,7 @@ from pydantic import BaseModel, Field
 from bahisync_engine import ai_suggest
 from bahisync_engine.export_excel import build_excel
 from bahisync_engine.export_tally import OPENING_SIGN_VERIFIED, build_ledger_masters_xml, build_vouchers_xml
-from bahisync_engine.opening import OpeningDecision, day_before, decide, dr_cr
+from bahisync_engine.opening import OpeningDecision, day_before, decide, dr_cr, inr
 from bahisync_engine.voucher_ids import account_identity
 from bahisync_engine.ledgers import DEFAULT_RULES, SUSPENSE, ClientRules, apply_user_choice, counterparty_key, suggest
 from bahisync_engine.parser import parse_statement
@@ -337,8 +338,54 @@ def import_guide(body: "ExportRequest", result, stem: str, opening: OpeningDecis
             amt = f"Dr {t.debit:.2f}" if t.debit else f"Cr {t.credit:.2f}"
             lines.append(f"   #{t.row_no}  {t.txn_date.strftime('%d-%m-%Y')}  {amt}")
         lines.append("")
+    lines += _post_import_checks(body, result, opening)
     lines.append("Check a few vouchers in Tally before you rely on the import.")
     return "\r\n".join(lines) + "\r\n"
+
+
+def _post_import_checks(body: "ExportRequest", result, opening: OpeningDecision) -> list[str]:
+    """What Tally should show after the import, so a missing, duplicated or moved
+    voucher is caught straight away. Counts only the vouchers actually exported."""
+    out = [t for t in result.transactions if t.ledger and t.amount and t.review_state != "excluded"]
+    if not out:
+        return []
+    types: dict[str, int] = {}
+    days: dict = {}
+    net = Decimal("0")
+    for t in out:
+        vtype = t.voucher_type or ("Receipt" if t.direction == "credit" else "Payment")
+        types[vtype] = types.get(vtype, 0) + 1
+        d = days.setdefault(t.txn_date, [0, Decimal("0"), Decimal("0")])
+        d[0] += 1
+        d[1] += t.credit
+        d[2] += t.debit
+        net += t.credit - t.debit
+    bank = body.bank_ledger.strip()
+    lines = [
+        "AFTER IMPORTING: CHECK THESE IN TALLY",
+        "-" * 37,
+        f"Vouchers: {len(out)} in total, " + ", ".join(f"{n} {k}" for k, n in sorted(types.items())) + ".",
+        "Day Book, date by date (bank receipts / bank payments):",
+    ]
+    for day in sorted(days):
+        n, cr, dr = days[day]
+        lines.append(f"   {day.strftime('%d-%m-%Y')}  {n:>3} voucher{'s' if n != 1 else ' '}  in {inr(cr):>14}  out {inr(dr):>14}")
+    if body.educational_mode:
+        lines.append("   (Educational mode: Tally shows these on the 1st / 2nd instead; the real dates are above.)")
+    if opening.status == "exported":
+        closing = opening.export + net
+        lines.append(f"{bank} closing balance after import: {dr_cr(closing)}"
+                     f" (opening {dr_cr(opening.export)} + net {dr_cr(net)}).")
+    else:
+        lines.append(f"{bank} should move by {dr_cr(net)} (net of these vouchers) from its balance before the import.")
+        if result.opening_balance is not None:
+            lines.append(f"If it showed {dr_cr(result.opening_balance)} before, it should now show {dr_cr(result.opening_balance + net)}.")
+    lines += [
+        "Each voucher carries a BahiSync ID (REMOTEID). Until a re-import test in TallyPrime confirms",
+        "Tally updates instead of duplicating, do NOT import the same vouchers file twice.",
+        "",
+    ]
+    return lines
 
 
 @app.post("/api/export/package")
