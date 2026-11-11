@@ -90,9 +90,8 @@ def expected(result) -> dict[str, str]:
 
 
 
-# One disposable TallyPrime company per test. SVCURRENTCOMPANY in each file is
-# set to the company that file is meant for (except B, which reproduces the
-# original QA file exactly, company name included).
+# One disposable TallyPrime company per test. SVCURRENTCOMPANY in every file is
+# the company that file is meant for, as named in README.
 CO_SIGN = "BahiSync Sign Test"
 CO_RENT = "BahiSync Rent Test"
 CO_DUP = "BahiSync Dup Test"
@@ -141,10 +140,11 @@ def build() -> Path:
     # A. Opening balance sign
     files["A_sign_test_masters.xml"] = sign_test_masters()
 
-    # B. Rent date: byte-for-byte the format the QA company imported (no REMOTEID,
-    # SVCURRENTCOMPANY "Sri Lakshmi Traders"), so the result is comparable.
-    files["B1_rent_test_masters.xml"] = _masters(sample, ORIGINAL_COMPANY, opening=False)
-    files["B2_rent_test_vouchers_original_format.xml"] = build_vouchers_xml(result.transactions, ORIGINAL_COMPANY, BANK)
+    # B. Rent date: the same voucher format the QA company imported (no REMOTEID,
+    # no opening balance). Only SVCURRENTCOMPANY differs from the QA file: it names
+    # the Rent test company, like every other file in the kit.
+    files["B1_rent_test_masters.xml"] = _masters(sample, CO_RENT, opening=False)
+    files["B2_rent_test_vouchers_original_format.xml"] = build_vouchers_xml(result.transactions, CO_RENT, BANK)
 
     # C. Main track: ACTION="Create" + REMOTEID, exactly what production exports.
     files["C1_masters_with_opening.xml"] = _masters(sample, CO_DUP)
@@ -283,7 +283,7 @@ def verify(files: dict[str, bytes], sample: dict) -> list[tuple[str, bool]]:
                      if l.find("OPENINGBALANCE") is not None] == [(BANK, "-184250.00")]))
 
     expected_company = {
-        "A_": CO_SIGN, "B1": ORIGINAL_COMPANY, "B2": ORIGINAL_COMPANY, "C1": CO_DUP, "C2": CO_DUP, "C4": CO_DUP,
+        "A_": CO_SIGN, "B1": CO_RENT, "B2": CO_RENT, "C1": CO_DUP, "C2": CO_DUP, "C4": CO_DUP,
         "C5": CO_DUP, "C6": CO_DUP, "C7": CO_ALT, "D_ignore": CO_D["ignore"], "D_modify": CO_D["modify"],
         "D_combine": CO_D["combine"], "E1": CO_OFF, "E2": CO_OFF,
     }
@@ -363,7 +363,7 @@ GROUND RULES
   for a manual file import: your Phase 1 QA import landed in "BahiSync QA Test"
   although the file said "{original}", and Tally's own import help starts with
   "Select the required company". In this kit every file's SVCURRENTCOMPANY matches
-  its test company anyway, except B (see below).
+  its test company anyway, so file and company always agree.
 * Record every import in RESULTS.csv (opens in Excel): Tally's import summary
   (created / altered / combined / ignored / errors), voucher count before and
   after, the HDFC Bank XX4321 closing balance, the Suspense A/c balance, and any
@@ -412,9 +412,10 @@ A. Import A_sign_test_masters.xml (Masters). Open each ledger (Alter > Ledger) a
 ----------------------------------------------------------------------------
 TEST B - Rent date                           Company: "{co_rent}"
 ----------------------------------------------------------------------------
-These two files reproduce the Phase 1 QA files exactly, including
-SVCURRENTCOMPANY "{original}" and no REMOTEID, so the result is comparable.
-Open "{co_rent}" as the active company; the name in the file is not used.
+These two files use the same format as the Phase 1 QA files (no REMOTEID, no
+opening balance), so the result is comparable. The only difference from the QA
+files is SVCURRENTCOMPANY, which now says "{co_rent}". Make "{co_rent}"
+the active company before importing.
 B1. Import B1_rent_test_masters.xml (Masters).
 B2. Import B2_rent_test_vouchers_original_format.xml (Transactions).
 B3. BEFORE opening any voucher: Day Book, period 1-Apr-2026 to 3-Apr-2026.
@@ -450,6 +451,7 @@ C6b. The same C6 file AGAIN. PASS: still 32 vouchers; HDFC {closing_c6} Dr.
 ----------------------------------------------------------------------------
 C7 - FALLBACK TRACK, ONLY IF C3 FAILED       Company: "{co_alt}" (new)
 ----------------------------------------------------------------------------
+Skip C7 entirely if C3 passed. Run it only when C3 doubled the vouchers.
 Same Overwrite = Yes setting.
 C7a. C7a_ALTER_TRACK_masters_with_opening.xml
 C7b. C7b_ALTER_TRACK_vouchers_create.xml        expected 30 vouchers, HDFC {closing} Dr
