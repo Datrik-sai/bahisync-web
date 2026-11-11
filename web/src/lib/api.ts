@@ -37,12 +37,24 @@ export type Summary = {
   /** Missing on statements parsed before v0.4. */
   rows_no_balance?: number;
   balance_status?: "verified" | "mismatch" | "partial" | "no_balance";
+  /** v0.5: where the opening balance came from, and printed-vs-calculated checks. */
+  opening_source?: "printed" | "derived" | "";
+  reconciliation?: ReconCheck[];
   balance_verified: boolean;
   opening_balance: string | null;
   closing_balance: string | null;
   total_debit: string;
   total_credit: string;
   warnings: string[];
+};
+
+export type ReconCheck = {
+  check: "opening" | "closing" | "total_debit" | "total_credit" | "continuity" | "missing_balance";
+  label: string;
+  printed: string | null;
+  computed: string | null;
+  status: "ok" | "mismatch" | "not_printed" | "warning";
+  note: string;
 };
 
 export type Statement = {

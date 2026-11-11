@@ -84,4 +84,20 @@ def statement_from_json(doc: dict[str, Any]) -> ParseResult:
         pages=int(s.get("pages", 0)),
         used_ocr=bool(s.get("used_ocr", False)),
         warnings=[str(w) for w in s.get("warnings", [])],
+        opening_source=str(s.get("opening_source", "")) if s.get("opening_source") in ("printed", "derived") else "",
+        reconciliation=_checks(s.get("reconciliation")),
     )
+
+
+_CHECK_KEYS = ("check", "label", "printed", "computed", "status", "note")
+
+
+def _checks(raw: Any) -> list[dict[str, Any]]:
+    """Reconciliation rows come back from the browser: keep known keys, as strings, bounded."""
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for c in raw[:20]:
+        if isinstance(c, dict) and c.get("status") in ("ok", "mismatch", "not_printed", "warning"):
+            out.append({k: (None if c.get(k) is None else str(c.get(k))[:400]) for k in _CHECK_KEYS})
+    return out

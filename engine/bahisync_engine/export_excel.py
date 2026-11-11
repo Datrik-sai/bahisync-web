@@ -14,6 +14,10 @@ FLAG_FILL = PatternFill("solid", fgColor="FFF4CE")
 FAIL_FILL = PatternFill("solid", fgColor="FDE2E1")
 
 
+def _num(v: str | None) -> float | None:
+    return float(v) if v is not None else None  # floats only at the Excel boundary
+
+
 def build_excel(result: ParseResult) -> bytes:
     wb = Workbook()
     ws = wb.active
@@ -56,8 +60,18 @@ def build_excel(result: ParseResult) -> bytes:
     ws.freeze_panes = "A2"
 
     s = wb.create_sheet("Summary")
+    extra = ("opening_source", "reconciliation")  # added in v0.5; listed below so earlier rows keep their places
     for k, v in result.summary().items():
+        if k in extra:
+            continue
         s.append([k.replace("_", " ").capitalize(), ", ".join(v) if isinstance(v, list) else v])
+    if result.reconciliation:
+        s.append([])
+        s.append(["Reconciliation", "Status", "Printed", "Calculated", "Note"])
+        for c in result.reconciliation:
+            s.append([c["label"], c["status"], _num(c["printed"]), _num(c["computed"]), c["note"]])
+        if result.opening_source:
+            s.append(["Opening balance source", result.opening_source])
     s.column_dimensions["A"].width = 22
     s.column_dimensions["B"].width = 60
 

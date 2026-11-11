@@ -321,6 +321,9 @@ export function ReviewScreen({ id }: { id: string }) {
         : status === "partial"
           ? { ok: true, label: `Balance check passed (${plural(s.rows_no_balance ?? 0, "row")} had no balance)` }
           : { ok: true, label: "Every row ties to the running balance" },
+    ...(s.reconciliation ?? [])
+      .filter((c) => c.status === "mismatch" && c.check !== "continuity")
+      .map((c) => ({ ok: false, label: `${c.label} doesn't match the statement: review before importing` })),
     { ok: reviewOpen === 0, label: reviewOpen ? `${plural(reviewOpen, "suggested ledger")} not reviewed yet` : "Suggested ledgers reviewed" },
     { ok: suspenseOpen === 0, label: suspenseOpen ? `${plural(suspenseOpen, "Suspense row")} not approved` : "Suspense rows approved or resolved" },
     { ok: prep.contraProblems === 0, label: prep.contraProblems ? `${plural(prep.contraProblems, "Contra voucher")} without a Bank or Cash ledger` : "Voucher types set" },
@@ -709,7 +712,9 @@ function StatusPanels({ status, summary, prep }: { status: string; summary: Stat
       : status === "partial"
         ? `${total - (summary.rows_no_balance ?? 0)} rows tie; ${plural(summary.rows_no_balance ?? 0, "row")} had no balance printed to check.`
         : status === "mismatch"
-          ? `${summary.rows_failed} of ${total} rows don't tie to the running balance. Check them against the PDF.`
+          ? summary.rows_failed
+            ? `${summary.rows_failed} of ${total} rows don't tie to the running balance. Check them against the PDF.`
+            : "Every row ties, but a printed figure (opening, closing or a total) disagrees with the rows. Review it below before exporting."
           : "This statement has no balance column, so rows can't be checked. Compare the totals with the PDF.";
   return (
     <div className="mt-6 grid gap-3 md:grid-cols-2">
@@ -717,6 +722,7 @@ function StatusPanels({ status, summary, prep }: { status: string; summary: Stat
         <h2 className="text-xs font-semibold uppercase tracking-wide opacity-80">Statement validation</h2>
         <p className="mt-0.5 text-lg font-[720]">{copy.title}</p>
         <p className="text-sm">{detail}</p>
+        {(summary.reconciliation ?? []).length > 0 && <ReconDetails checks={summary.reconciliation ?? []} />}
       </section>
       <section aria-label="Voucher preparation" className="rounded-lg border border-rule-strong bg-sheet px-4 py-3">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Voucher preparation</h2>
@@ -728,6 +734,35 @@ function StatusPanels({ status, summary, prep }: { status: string; summary: Stat
         </dl>
       </section>
     </div>
+  );
+}
+
+const RECON_MARK: Record<string, string> = { ok: "✓", mismatch: "✗", warning: "!", not_printed: "–" };
+
+function ReconDetails({ checks }: { checks: NonNullable<Statement["summary"]["reconciliation"]> }) {
+  const problem = checks.some((c) => c.status === "mismatch");
+  return (
+    <details open={problem} className="mt-2 text-sm text-ink">
+      <summary className="cursor-pointer font-semibold">Printed vs calculated</summary>
+      <ul className="mt-1.5 grid gap-1" aria-label="Printed vs calculated checks">
+        {checks.map((c) => (
+          <li key={c.check} className={`flex gap-2 ${c.status === "mismatch" ? "font-semibold text-mismatch" : c.status === "ok" ? "" : "text-ink-soft"}`}>
+            <span aria-hidden className="w-4 shrink-0 text-center">{RECON_MARK[c.status]}</span>
+            <span>
+              <span className="sr-only">{c.status === "not_printed" ? "Not printed: " : `${c.status}: `}</span>
+              {c.label}
+              {c.printed !== null && c.computed !== null && (
+                <span className="tabular-nums">
+                  {" "}
+                  · printed ₹{moneyAlways(c.printed)}, rows give ₹{moneyAlways(c.computed)}
+                </span>
+              )}
+              {c.status !== "ok" && c.note && <span className="block text-xs">{c.note}</span>}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 

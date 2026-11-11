@@ -86,6 +86,10 @@ class ParseResult:
     pages: int
     used_ocr: bool
     warnings: list[str] = field(default_factory=list)
+    # "printed" (read from the statement) | "derived" (worked out from row 1) | "" (unknown)
+    opening_source: str = ""
+    # Printed-vs-calculated checks from summary.reconcile (opening, closing, totals, continuity).
+    reconciliation: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def rows_total(self) -> int:
@@ -104,14 +108,19 @@ class ParseResult:
         """verified | mismatch | partial (some rows had no balance to check) | no_balance."""
         if not self.transactions or self.rows_no_balance == self.rows_total:
             return "no_balance"
-        if self.rows_failed:
+        if self.rows_failed or self.reconciliation_mismatches:
             return "mismatch"
         return "partial" if self.rows_no_balance else "verified"
 
     @property
+    def reconciliation_mismatches(self) -> list[str]:
+        """Printed figures (opening, closing, totals) that disagree with the rows."""
+        return [c["check"] for c in self.reconciliation if c.get("status") == "mismatch" and c.get("check") != "continuity"]
+
+    @property
     def balance_verified(self) -> bool:
         """True only when every row has a balance and every running balance ties."""
-        return bool(self.transactions) and all(t.balance_ok for t in self.transactions)
+        return bool(self.transactions) and all(t.balance_ok for t in self.transactions) and not self.reconciliation_mismatches
 
     @property
     def total_debit(self) -> Decimal:
@@ -139,5 +148,7 @@ class ParseResult:
             "closing_balance": fmt(self.closing_balance),
             "total_debit": fmt(self.total_debit),
             "total_credit": fmt(self.total_credit),
+            "opening_source": self.opening_source,
+            "reconciliation": self.reconciliation,
             "warnings": self.warnings,
         }
