@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { PdfEvidence } from "@/components/PdfEvidence";
 import { PrivacyNote } from "@/components/PrivacyNote";
+import { defaultBooksBegin, drCr, startsAtBooksBegin } from "@/lib/opening";
 import { hasPdf, loadPdf } from "@/lib/pdfStore";
 import { SiteHeader } from "@/components/Wordmark";
 import { downloadExport, formatDate, getLedgers, money, moneyAlways, type ClientRules, type LedgerOption, type Statement, type Txn } from "@/lib/api";
@@ -91,6 +92,9 @@ export function ReviewScreen({ id }: { id: string }) {
   const [company, setCompany] = useState("");
   const [bankLedger, setBankLedger] = useState("");
   const [educational, setEducational] = useState(false);
+  // Never remembered: the accountant confirms the opening balance afresh for every export.
+  const [openingConfirmed, setOpeningConfirmed] = useState(false);
+  const [booksBegin, setBooksBegin] = useState("");
   const [exporting, setExporting] = useState<ExportKind | null>(null);
   const [exportError, setExportError] = useState("");
   const [asking, setAsking] = useState(false);
@@ -240,9 +244,12 @@ export function ReviewScreen({ id }: { id: string }) {
       await downloadExport(st, kind, company.trim(), bankLedger.trim(), {
         educationalMode: educational,
         existingLedgers: masters.map((m) => m.name),
+        openingConfirmed: openingAllowed && openingConfirmed,
+        booksBegin: books,
       });
-    } catch {
-      setExportError("Couldn't create the file. Check your connection and try again.");
+    } catch (err) {
+      const msg = err instanceof Error && err.message ? err.message : "";
+      setExportError(msg && !/fetch|network/i.test(msg) ? msg : "Couldn't create the file. Check your connection and try again.");
     } finally {
       setExporting(null);
     }
@@ -305,6 +312,11 @@ export function ReviewScreen({ id }: { id: string }) {
   const s = st.summary;
   const exportReady = Boolean(company.trim() && bankLedger.trim());
   const status = balanceStatus(st);
+  const firstDate = st.transactions[0]?.txn_date ?? "";
+  const books = booksBegin || (firstDate ? defaultBooksBegin(firstDate) : "");
+  const openingKnown = s.opening_balance !== null && s.opening_balance !== undefined;
+  const bankInTally = masters.some((m) => m.name.trim().toLowerCase() === bankLedger.trim().toLowerCase());
+  const openingAllowed = Boolean(openingKnown && firstDate && startsAtBooksBegin(firstDate, books) && !bankInTally);
   const prep = prepSummary(st);
   const mismatchOpen = st.transactions.filter((t) => t.balance_ok === false && !t.review_state).length;
   const suspenseOpen = st.transactions.filter((t) => t.ledger === SUSPENSE && !t.review_state).length;
@@ -544,14 +556,62 @@ export function ReviewScreen({ id }: { id: string }) {
             </div>
 
             <label className="mt-4 grid gap-1 text-sm">
-              <span className="font-semibold">Company name in Tally</span>
+              <span className="font-semibold">Tally company name</span>
               <input value={company} onChange={(e) => setCompany(e.target.value)} onBlur={() => persistExport({ company })} className="rounded-md border border-rule-strong px-3 py-2" />
+              <span className="text-ink-faint">Recorded in the files. A file import goes into the company that is open in Tally.</span>
             </label>
             <label className="mt-3 grid gap-1 text-sm">
               <span className="font-semibold">Bank ledger name</span>
               <input value={bankLedger} onChange={(e) => setBankLedger(e.target.value)} onBlur={() => persistExport({ bankLedger })} className="rounded-md border border-rule-strong px-3 py-2" />
               <span className="text-ink-faint">Must match the bank ledger in Tally exactly.</span>
             </label>
+            {openingKnown && (
+              <fieldset className="mt-4 rounded-md border border-rule px-3 py-3 text-sm" aria-label="Opening balance">
+                <legend className="px-1 font-semibold">Opening balance</legend>
+                <p>
+                  Statement opening: <span className="font-semibold tabular-nums">{drCr(s.opening_balance ?? "0")}</span>
+                  <span className="block text-xs text-ink-faint">
+                    {s.opening_source === "derived" ? "Not printed on the statement: worked out from row 1." : "As printed on the statement."}
+                  </span>
+                </p>
+                <label className="mt-2 grid gap-1">
+                  <span className="text-xs font-semibold text-ink-soft">Books in Tally begin on</span>
+                  <input
+                    type="date"
+                    value={books}
+                    onChange={(e) => {
+                      setBooksBegin(e.target.value);
+                      setOpeningConfirmed(false);
+                    }}
+                    className="rounded-md border border-rule-strong px-2 py-1.5"
+                  />
+                </label>
+                <label className={`mt-2 flex gap-2 ${openingAllowed ? "" : "opacity-60"}`}>
+                  <input
+                    type="checkbox"
+                    checked={openingAllowed && openingConfirmed}
+                    disabled={!openingAllowed}
+                    onChange={(e) => setOpeningConfirmed(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 shrink-0 accent-[#1c2a5a]"
+                  />
+                  <span>
+                    <span className="font-semibold">Set the opening balance</span>
+                    <span className="block text-xs text-ink-faint">
+                      I confirm {drCr(s.opening_balance ?? "0")} is {bankLedger.trim() || "the bank ledger"}&apos;s balance at the start of the books. Import the
+                      masters file once.
+                    </span>
+                  </span>
+                </label>
+                {!openingAllowed && (
+                  <p className="mt-2 text-xs text-ink-soft">
+                    {bankInTally
+                      ? "This bank ledger is already in the loaded Tally masters, so its opening balance won't be changed."
+                      : `This statement starts on ${formatDate(firstDate)}, after the books' first month, so its opening balance isn't a ledger opening balance. The import guide gives the balance Tally should already show.`}
+                  </p>
+                )}
+              </fieldset>
+            )}
+
             <label className="mt-3 flex gap-2 text-sm">
               <input
                 type="checkbox"

@@ -19,6 +19,7 @@ import re
 import secrets
 import time
 import zipfile
+from datetime import date
 from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException
@@ -27,7 +28,8 @@ from pydantic import BaseModel, Field
 
 from bahisync_engine import ai_suggest
 from bahisync_engine.export_excel import build_excel
-from bahisync_engine.export_tally import build_ledger_masters_xml, build_vouchers_xml
+from bahisync_engine.export_tally import OPENING_SIGN_VERIFIED, build_ledger_masters_xml, build_vouchers_xml
+from bahisync_engine.opening import OpeningDecision, day_before, decide, dr_cr
 from bahisync_engine.ledgers import DEFAULT_RULES, SUSPENSE, ClientRules, apply_user_choice, counterparty_key, suggest
 from bahisync_engine.parser import parse_statement
 from bahisync_engine.pdf_io import PasswordRequired, ScannedUnsupported, UnreadablePDF, ocr_available
@@ -180,6 +182,10 @@ class ExportRequest(BaseModel):
     bank_ledger: str = Field("", max_length=120)
     educational_mode: bool = False  # vouchers: TallyPrime Educational mode dates (1st / 2nd / 31st)
     existing_ledgers: list[str] = Field(default_factory=list, max_length=20000)  # masters: skip these
+    # The accountant confirmed the statement's opening balance is the bank balance at the
+    # start of the books (books_begin, YYYY-MM-DD). Without both, no OPENINGBALANCE is written.
+    opening_confirmed: bool = False
+    books_begin: str = Field("", max_length=10)
 
 
 @app.post("/api/export/excel")
@@ -192,13 +198,34 @@ def export_excel(body: ExportRequest) -> Response:
     )
 
 
-def _masters_xml(body: "ExportRequest", result) -> bytes:
+def _opening(body: "ExportRequest", result) -> OpeningDecision:
+    books = None
+    if body.books_begin:
+        try:
+            books = date.fromisoformat(body.books_begin)
+        except ValueError:
+            raise HTTPException(400, detail={"code": "bad_books_begin", "message": "Books-beginning date must be YYYY-MM-DD."})
+    bank_in_tally = body.bank_ledger.strip().lower() in {str(x).strip().lower() for x in body.existing_ledgers}
+    d = decide(result, body.opening_confirmed, books, bank_in_tally)
+    if body.opening_confirmed and d.status == "not_at_books_begin":
+        # Refuse rather than silently drop what the accountant asked for.
+        raise HTTPException(400, detail={
+            "code": "opening_not_at_books_begin",
+            "message": "This statement doesn't start in the first month of the books, so its opening balance "
+                       "can't be the ledger's opening balance. Untick the confirmation; the import guide will "
+                       "give the balance Tally should already show instead.",
+        })
+    return d
+
+
+def _masters_xml(body: "ExportRequest", result, opening: OpeningDecision | None = None) -> bytes:
     used = {t.ledger for t in result.transactions if t.ledger and t.review_state != "excluded"}
     groups = {str(k): str(v) for k, v in (body.statement.get("groups") or {}).items()}
     groups.update({t.ledger: t.group for t in result.transactions if t.ledger and t.group})
     groups = {k: (v if v in TALLY_GROUPS else "Suspense A/c") for k, v in groups.items()}
     existing = {str(x)[:120] for x in body.existing_ledgers}
-    return build_ledger_masters_xml(body.company.strip(), body.bank_ledger.strip(), groups, used, existing)
+    opening = opening or _opening(body, result)
+    return build_ledger_masters_xml(body.company.strip(), body.bank_ledger.strip(), groups, used, existing, opening.export)
 
 
 def _require_names(body: "ExportRequest") -> None:
@@ -227,13 +254,50 @@ def _n(n: int, one: str, many: str) -> str:
     return f"{n} {one if n == 1 else many}"
 
 
-def import_guide(body: "ExportRequest", result, stem: str) -> str:
+def _opening_lines(body: "ExportRequest", result, d: OpeningDecision) -> list[str]:
+    bank = body.bank_ledger.strip()
+    if d.status == "exported":
+        lines = [
+            f"Opening balance: the masters file sets {bank}'s opening balance to {dr_cr(d.export)}",
+            f"as on {d.books_begin.strftime('%d-%m-%Y')} (you confirmed this is the start of the books).",
+            "Import the masters file ONCE. If Tally asks what to do with masters that already exist,",
+            "choose 'Ignore duplicates'. 'Combine opening balance' would add it a second time.",
+        ]
+        if result.opening_source == "derived":
+            lines.append("The statement doesn't print an opening balance; this one is worked out from row 1.")
+        if not OPENING_SIGN_VERIFIED:
+            lines.append(f"After importing, open {bank} and confirm Tally shows {dr_cr(d.export)} as its opening balance.")
+        return lines + [""]
+    if d.status in ("empty", "unknown"):
+        return ["Opening balance: not known for this statement, so none was set.", ""]
+    opening = result.opening_balance
+    why = {
+        "not_confirmed": "not set (you didn't confirm it's the start of the books)",
+        "not_at_books_begin": "not set (the statement starts after the books' first month)",
+        "bank_in_tally": f"not set ({bank} already exists in this Tally company)",
+    }[d.status]
+    return [
+        f"Opening balance: {why}.",
+        f"BEFORE importing the vouchers, {bank} in Tally should show a closing balance of",
+        f"{dr_cr(opening)} as on {day_before(d.first_txn).strftime('%d-%m-%Y')}. If it doesn't, the books don't continue",
+        "from this statement: find the gap before importing.",
+    ] + ([
+        f"If {d.first_txn.strftime('%B %Y')} is the start of your books in Tally, tick 'Set the opening balance'",
+        "in BahiSync's export panel and download again, so the opening balance is set for you.",
+    ] if d.status == "not_confirmed" else []) + [""]
+
+
+def import_guide(body: "ExportRequest", result, stem: str, opening: OpeningDecision | None = None) -> str:
+    opening = opening or _opening(body, result)
     excluded = [t for t in result.transactions if t.review_state == "excluded"]
     suspense = [t for t in result.transactions if t.ledger == SUSPENSE and t.review_state != "excluded"]
     status = {
         "verified": "Every row ties to the running balance.",
         "partial": f"{_n(result.rows_no_balance, 'row had', 'rows had')} no balance printed, so could not be checked.",
-        "mismatch": f"{_n(result.rows_failed, 'row does', 'rows do')} NOT tie to the running balance. Check against the PDF first.",
+        "mismatch": (f"{_n(result.rows_failed, 'row does', 'rows do')} NOT tie to the running balance. Check against the PDF first."
+                     if result.rows_failed else
+                     "A printed figure (" + ", ".join(result.reconciliation_mismatches).replace("_", " ")
+                     + ") does NOT match the rows. Check against the PDF first."),
         "no_balance": "This statement has no balance column, so rows could not be checked against a running balance.",
     }[result.balance_status]
     lines = [
@@ -250,10 +314,11 @@ def import_guide(body: "ExportRequest", result, stem: str) -> str:
         f"2. Gateway of Tally > Import > Masters > {stem}_tally_ledgers.xml",
         "   This creates any ledgers that don't exist yet.",
         f"3. Gateway of Tally > Import > Transactions > {stem}_tally_vouchers.xml",
-        "4. Open the bank ledger and compare its closing balance with the statement.",
+        "4. Open the bank ledger and compare its closing balance with the statement (see below).",
         f"5. {stem}.xlsx has every row, its ledger and the balance check, for your working papers.",
         "",
     ]
+    lines += _opening_lines(body, result, opening)
     if body.educational_mode:
         lines += ["Educational mode: voucher dates were moved to the 1st or 2nd of the month (the 1st, 2nd and 31st stay).",
                   "The real date is at the start of each narration.", ""]
@@ -277,12 +342,13 @@ def export_package(body: ExportRequest) -> Response:
     result = _load(body.statement)
     stem = _stem(body.statement)
     buf = io.BytesIO()
+    opening = _opening(body, result)
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr(f"{stem}_tally_ledgers.xml", _masters_xml(body, result))
+        z.writestr(f"{stem}_tally_ledgers.xml", _masters_xml(body, result, opening))
         z.writestr(f"{stem}_tally_vouchers.xml",
                    build_vouchers_xml(result.transactions, body.company.strip(), body.bank_ledger.strip(), body.educational_mode))
         z.writestr(f"{stem}.xlsx", build_excel(result))
-        z.writestr("HOW-TO-IMPORT.txt", import_guide(body, result, stem))
+        z.writestr("HOW-TO-IMPORT.txt", import_guide(body, result, stem, opening))
     return Response(
         buf.getvalue(),
         media_type="application/zip",

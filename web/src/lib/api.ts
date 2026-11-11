@@ -165,7 +165,7 @@ export async function downloadExport(
   kind: "excel" | "ledgers" | "vouchers" | "package",
   company: string,
   bankLedger: string,
-  opts: { educationalMode?: boolean; existingLedgers?: string[] } = {},
+  opts: { educationalMode?: boolean; existingLedgers?: string[]; openingConfirmed?: boolean; booksBegin?: string } = {},
 ): Promise<void> {
   const url = kind === "excel" ? "/api/export/excel" : kind === "package" ? "/api/export/package" : `/api/export/tally/${kind}`;
   const res = await fetch(url, {
@@ -177,6 +177,8 @@ export async function downloadExport(
       bank_ledger: bankLedger,
       educational_mode: Boolean(opts.educationalMode),
       existing_ledgers: opts.existingLedgers ?? [],
+      opening_confirmed: Boolean(opts.openingConfirmed),
+      books_begin: opts.booksBegin ?? "",
     }),
   });
   if (!res.ok) throw await errorFrom(res);

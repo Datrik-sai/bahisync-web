@@ -127,3 +127,98 @@ def test_reconciliation_round_trips_through_json(fixtures):
     r = parse_statement(fixtures["hdfc"].pdf)
     back = statement_from_json(statement_to_json(r, {}, "x.pdf", 0, "id"))
     assert back.reconciliation == r.reconciliation and back.opening_source == "printed"
+
+
+# ------------------------------------------------- step 3: opening balance export
+
+import io as _io
+import json as _json
+import zipfile as _zip
+from pathlib import Path
+from xml.etree import ElementTree as ET
+
+from fastapi.testclient import TestClient
+
+from bahisync_engine.export_tally import build_ledger_masters_xml, opening_balance_value
+from bahisync_engine.opening import decide, default_books_begin, starts_at_books_begin
+from service.app import app
+
+SAMPLE = Path(__file__).resolve().parents[2] / "web" / "src" / "lib" / "sample-hdfc.json"
+
+
+def _ledgers(xml: bytes) -> dict[str, ET.Element]:
+    return {l.get("NAME"): l for l in ET.fromstring(xml).iter("LEDGER")}
+
+
+def test_opening_sign_dr_cr_zero():
+    assert opening_balance_value(D("184250")) == "-184250.00"  # funds in the bank = Dr
+    assert opening_balance_value(D("-184250")) == "184250.00"  # overdraft = Cr
+    assert opening_balance_value(D("0")) == "0.00"
+
+
+def test_opening_only_on_the_bank_ledger():
+    xml = build_ledger_masters_xml("Co", "HDFC Bank", {"Rent": "Indirect Expenses"}, {"Rent"}, opening=D("184250.00"))
+    led = _ledgers(xml)
+    assert led["HDFC Bank"].findtext("OPENINGBALANCE") == "-184250.00"
+    assert led["Rent"].find("OPENINGBALANCE") is None
+
+
+def test_no_opening_tag_when_not_given():
+    xml = build_ledger_masters_xml("Co", "HDFC Bank", {}, set())
+    assert b"OPENINGBALANCE" not in xml
+
+
+def test_books_begin_rules():
+    assert default_books_begin(date(2026, 4, 3)) == date(2026, 4, 1)
+    assert default_books_begin(date(2027, 2, 10)) == date(2026, 4, 1)
+    assert starts_at_books_begin(date(2026, 4, 3), date(2026, 4, 1))
+    assert not starts_at_books_begin(date(2026, 7, 1), date(2026, 4, 1))  # mid-year
+    assert not starts_at_books_begin(date(2026, 3, 31), date(2026, 4, 1))  # before the books
+
+
+def _sample():
+    return _json.loads(SAMPLE.read_text())
+
+
+def _post(kind, **extra):
+    body = {"statement": _sample(), "company": "BahiSync QA Test", "bank_ledger": "HDFC Bank XX4321", **extra}
+    return TestClient(app).post(f"/api/export/{kind}", json=body)
+
+
+def test_sample_opening_exported_only_when_confirmed():
+    plain = _post("tally/ledgers")
+    assert plain.status_code == 200 and b"OPENINGBALANCE" not in plain.content
+    ok = _post("tally/ledgers", opening_confirmed=True, books_begin="2026-04-01")
+    led = _ledgers(ok.content)
+    assert led["HDFC Bank XX4321"].findtext("OPENINGBALANCE") == "-184250.00"
+    assert sum(1 for l in led.values() if l.find("OPENINGBALANCE") is not None) == 1
+
+
+def test_confirmed_mid_year_is_refused():
+    r = _post("tally/ledgers", opening_confirmed=True, books_begin="2025-04-01")
+    assert r.status_code == 400 and r.json()["detail"]["code"] == "opening_not_at_books_begin"
+
+
+def test_bank_ledger_already_in_tally_gets_no_opening():
+    r = _post("tally/ledgers", opening_confirmed=True, books_begin="2026-04-01", existing_ledgers=["hdfc bank xx4321"])
+    assert b"OPENINGBALANCE" not in r.content and b"HDFC Bank XX4321" not in r.content
+
+
+def test_guide_explains_opening_both_ways():
+    def guide(**extra):
+        z = _zip.ZipFile(_io.BytesIO(_post("package", **extra).content))
+        return z.read("HOW-TO-IMPORT.txt").decode()
+
+    g = guide(opening_confirmed=True, books_begin="2026-04-01")
+    assert "Rs 1,84,250.00 Dr" in g and "Import the masters file ONCE" in g and "Ignore duplicates" in g
+    g = guide()
+    assert "should show a closing balance of" in g and "Rs 1,84,250.00 Dr as on 31-03-2026" in g
+
+
+def test_decide_statuses():
+    r = ParseResult("X", "", [_t(1, 3, debit="10", bal="90")], D("100"), D("90"), 1, False)
+    assert decide(r, False, date(2026, 4, 1), False).status == "not_confirmed"
+    assert decide(r, True, date(2026, 4, 1), False).export == D("100")
+    assert decide(r, True, date(2026, 4, 1), True).status == "bank_in_tally"
+    r.opening_balance = None
+    assert decide(r, True, date(2026, 4, 1), False).status == "unknown"

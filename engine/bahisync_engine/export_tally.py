@@ -48,11 +48,36 @@ def _serialise(env: ET.Element) -> bytes:
     return ET.tostring(env, encoding="utf-8", xml_declaration=True)
 
 
+# Sign of a ledger's opening balance in Tally XML. Tally's own integration
+# example gives a bank ledger <OPENINGBALANCE>-12500</OPENINGBALANCE>, which
+# matches the voucher convention above (debit = negative). NOT YET VERIFIED in a
+# real TallyPrime import: the Tally test kit (tests/fixtures/make_tally_kit.py)
+# imports Rs 1,84,250 Dr, Rs 1,84,250 Cr and zero to confirm it. Flip this
+# only on evidence from that test.
+OPENING_SIGN_VERIFIED = False
+
+
+def opening_balance_value(balance: Decimal) -> str:
+    """Bank balance as the statement prints it (positive = money in the account,
+    i.e. Dr in the books; negative = overdraft, Cr) -> Tally OPENINGBALANCE text."""
+    return f"{-balance:.2f}" if balance else "0.00"
+
+
 def build_ledger_masters_xml(
-    company: str, bank_ledger: str, ledger_groups: dict[str, str], used: set[str], existing: set[str] | None = None
+    company: str,
+    bank_ledger: str,
+    ledger_groups: dict[str, str],
+    used: set[str],
+    existing: set[str] | None = None,
+    opening: Decimal | None = None,
 ) -> bytes:
     """`existing` = ledger names already in the client's Tally (from their masters
-    export); they are left out so the import never touches them."""
+    export); they are left out so the import never touches them.
+
+    `opening` = the bank balance at the start of the books, set on the bank
+    ledger only, and only when the caller has confirmed the statement starts
+    there (see service/app.py opening_for_export). None = no OPENINGBALANCE tag.
+    """
     env, data = _envelope(company, "All Masters")
     groups = dict(ledger_groups)
     groups.setdefault(bank_ledger, "Bank Accounts")
@@ -64,6 +89,8 @@ def build_ledger_masters_xml(
         led = _sub(msg, "LEDGER", NAME=name, ACTION="Create")
         _sub(_sub(led, "NAME.LIST"), "NAME", name)
         _sub(led, "PARENT", groups.get(name, "Suspense A/c"))
+        if opening is not None and name == bank_ledger:
+            _sub(led, "OPENINGBALANCE", opening_balance_value(opening))
     return _serialise(env)
 
 
