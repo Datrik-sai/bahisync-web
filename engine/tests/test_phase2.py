@@ -395,3 +395,32 @@ def test_wrong_printed_opening_is_reported_once(fixtures):
     st = {c["check"]: c["status"] for c in r.reconciliation}
     assert st["opening"] == "mismatch" and st["closing"] == "ok"
     assert "difference 100.00" in next(c["note"] for c in r.reconciliation if c["check"] == "opening")
+
+
+# ------------------------------------------------- X experiment kit (Test E follow-up)
+
+
+def test_x_kit_isolates_one_variable_per_file(tmp_path, monkeypatch):
+    from tests.fixtures import make_x_kit as xk
+
+    monkeypatch.setattr(xk, "OUT", tmp_path / "x_kit")
+    xk.build()
+    for key, company in xk.COMPANIES.items():
+        files = {p.name: p.read_bytes() for p in (tmp_path / "x_kit" / key).iterdir()}
+        assert len(files) == 7
+        checks = xk.verify(files, company)
+        assert len(checks) == 11 and all(ok for _, ok in checks), checks
+    header = (tmp_path / "x_kit" / "RESULTS_X.csv").read_text(encoding="utf-8-sig").splitlines()[0]
+    for col in ("Created", "Altered", "Ignored", "Errors", "Vouchers before", "Vouchers after", "Overwrite setting shown"):
+        assert col in header
+    readme = (tmp_path / "x_kit" / "README.txt").read_text()
+    assert "Export (Alt+E" in readme and "import summary" in readme
+
+
+def test_x_kit_detects_an_extra_difference(tmp_path, monkeypatch):
+    from tests.fixtures import make_x_kit as xk
+
+    files = xk.build_files(xk.COMPANIES["no"])
+    files["X4_remoteid_B_base.xml"] = files["X4_remoteid_B_base.xml"].replace(b"X TEST PAYMENT", b"X TEST PAYMENT 2")
+    failed = [n for n, ok in xk.verify(files, xk.COMPANIES["no"]) if not ok]
+    assert any(n.startswith("X4 differs") for n in failed) and any(n.startswith("X4: text") for n in failed)
